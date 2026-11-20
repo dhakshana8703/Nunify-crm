@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Nunify CRM{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='crm.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='workflow.css') }}">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <div class="workspace{% if request.endpoint == 'workflow.login' %} is-sign-in{% endif %}">
+    {% if request.endpoint != 'workflow.login' %}
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <a class="brand" href="{{ url_for('home') }}">
+        <span class="brand-mark" aria-hidden="true">n</span>
+        <span>Nunify CRM</span>
+      </a>
+      <nav class="sidebar-nav" aria-label="CRM">
+        {% if current_user and current_user.role == 'sdr' %}
+          <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.today' %} is-current{% endif %}" href="{{ url_for('workflow.today') }}"{% if request.endpoint == 'workflow.today' %} aria-current="page"{% endif %}>Today</a>
+          <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.my_accounts' %} is-current{% endif %}" href="{{ url_for('workflow.my_accounts') }}"{% if request.endpoint == 'workflow.my_accounts' %} aria-current="page"{% endif %}>My Accounts</a>
+        {% elif current_user and current_user.role in ('manager', 'admin') %}
+          <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.assignment' %} is-current{% endif %}" href="{{ url_for('workflow.assignment') }}"{% if request.endpoint == 'workflow.assignment' %} aria-current="page"{% endif %}>Assignments</a>
+        {% endif %}
+        {% if current_user is not defined or not current_user or current_user.role != 'ae' %}
+        <div class="nav-heading">Accounts <span>{{ accounts|default([])|length }}</span></div>
+        <ul class="account-nav">
+          {% for entry in accounts|default([]) %}
+            {% set current = account and account.id == entry.id %}
+            <li>
+              <a class="nav-link{% if current %} is-current{% endif %}" href="{{ url_for('account_detail', account_id=entry.id) }}"{% if current %} aria-current="page"{% endif %}>
+                <span class="account-initial" aria-hidden="true">{{ entry.name[0]|upper }}</span>
+                <span class="account-nav-text">
+                  <strong>{{ entry.name }}</strong>
+                  {% if entry.domain %}<small>{{ entry.domain }}</small>{% endif %}
+                </span>
+              </a>
+            </li>
+          {% else %}
+            <li class="sidebar-empty">No imported accounts</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if current_user is not defined or not current_user or current_user.role in ('manager', 'admin') %}
+        <a class="nav-link review-nav{% if request.endpoint == 'review' %} is-current{% endif %}" href="{{ url_for('review') }}"{% if request.endpoint == 'review' %} aria-current="page"{% endif %}>
+          <span>Directory review</span>
+          {% if review_count is defined %}<span class="nav-count">{{ review_count }}</span>{% endif %}
+        </a>
+        {% endif %}
+      </nav>
+      <div class="sidebar-footer workspace-user">
+        {% if current_user %}
+          <div>
+            <strong>{{ current_user.name }}</strong>
+            <small>{{ current_user.role|upper if current_user.role in ('sdr', 'ae') else current_user.role|capitalize }}</small>
+          </div>
+          <form action="{{ url_for('workflow.logout') }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="button button-small">Sign out</button>
+          </form>
+        {% else %}
+          <span class="status-dot" aria-hidden="true"></span> Local demo
+        {% endif %}
+      </div>
+    </aside>
+    {% endif %}
+
+    <main class="main-content" id="main-content">
+      {% for category, message in get_flashed_messages(with_categories=true) %}
+        <div class="workflow-notice{% if category in ('error', 'danger') %} is-error{% endif %}" role="status">{{ message }}</div>
+      {% endfor %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+
+{% block title %}Directory review | Nunify CRM{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <span class="source-label source-directory">Directory of Associations</span>
+    <h1>Directory review</h1>
+    <p>These listings are staged without an account link.</p>
+  </header>
+
+  {% set status = host_filter|default(request.args.get('status', 'all'), true) %}
+  <section class="source-panel review-panel" aria-labelledby="listing-heading">
+    <form class="review-controls" action="{{ url_for('review') }}" method="get">
+      <div class="search-field">
+        <label for="listing-search">Search listings</label>
+        <input id="listing-search" type="search" name="search" value="{{ search }}" placeholder="Name, host or listing ID">
+      </div>
+      <div>
+        <label for="listing-status">Match status</label>
+        <select id="listing-status" name="status">
+          <option value="all"{% if status == 'all' %} selected{% endif %}>All</option>
+          <option value="shared-domain"{% if status == 'shared-domain' %} selected{% endif %}>Shared domain</option>
+          <option value="no-domain"{% if status == 'no-domain' %} selected{% endif %}>Missing domain</option>
+        </select>
+      </div>
+      <div>
+        <label for="listing-sort">Sort by</label>
+        <select id="listing-sort" name="sort">
+          <option value="name"{% if sort == 'name' %} selected{% endif %}>Name</option>
+          <option value="id"{% if sort == 'id' %} selected{% endif %}>Listing ID</option>
+        </select>
+      </div>
+      <div>
+        <label for="review-size">Per page</label>
+        <select id="review-size" name="page_size">
+          {% for size in (25, 50, 100) %}
+            <option value="{{ size }}"{% if size == page_size %} selected{% endif %}>{{ size }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit">Apply</button>
+    </form>
+
+    <h2 class="review-results-heading" id="listing-heading">{{ total }} {{ 'listing' if total == 1 else 'listings' }}</h2>
+    <ul class="review-results">
+      {% for listing in items %}
+        {% set listing_url = listing.source_url|default('', true) %}
+        {% set location = [listing.city, listing.state, listing.country]|select|join(', ') %}
+        <li class="review-row">
+          <div>
+            <h3>{{ listing.name }}</h3>
+            <p>{{ listing.reason }}</p>
+          </div>
+          <dl class="evidence-fields">
+            <div><dt>Website host</dt><dd>{{ listing.host|default('Unavailable', true) }}</dd></div>
+            <div><dt>Listing type</dt><dd>{{ listing.listing_type|default('Unavailable', true) }}</dd></div>
+            <div><dt>Membership</dt><dd>{{ listing.members|default('Unavailable', true) }}</dd></div>
+            {% if location %}<div><dt>Location</dt><dd>{{ location }}</dd></div>{% endif %}
+          </dl>
+          <div class="listing-reference">
+            <span>Listing ID</span>
+            <code>{{ listing.id }}</code>
+            <div class="reference-links">
+              {% if listing_url.startswith(('https://', 'http://')) %}
+                <a class="text-link" href="{{ listing_url }}" target="_blank" rel="noopener noreferrer">View directory listing</a>
+              {% endif %}
+              <a class="text-link" href="{{ url_for('api_get_listing', source_id=listing.id) }}">View saved record</a>
+            </div>
+          </div>
+        </li>
+      {% else %}
+        <li class="empty-state">No listings match the current filters.</li>
+      {% endfor %}
+    </ul>
+
+    {% if pages > 1 %}
+      <nav class="pagination" aria-label="Review results pagination">
+        {% if page > 1 %}
+          <a class="text-link" rel="prev" href="{{ url_for('review', search=search, status=status, sort=sort, page_size=page_size, page=page - 1) }}">Previous</a>
+        {% endif %}
+        <span>Page {{ page }} of {{ pages }}</span>
+        {% if page < pages %}
+          <a class="text-link" rel="next" href="{{ url_for('review', search=search, status=status, sort=sort, page_size=page_size, page=page + 1) }}">Next</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}
