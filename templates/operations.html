@@ -1,0 +1,125 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import page_links with context %}
+{% block title %}Operations | Nunify CRM{% endblock %}
+{% block content %}
+  <header class="page-header"><h1>Operations</h1><p>{{ credits }} demo enrichment credits recorded</p></header>
+  <section class="source-panel workflow-panel">
+    <header class="panel-header"><h2>Account coverage</h2></header>
+    <div class="workflow-panel-body">
+      <dl class="assignment-details">
+        <div><dt>Accounts</dt><dd>{{ coverage.accounts }}</dd></div>
+        <div><dt>Assigned</dt><dd>{{ coverage.assigned }}</dd></div>
+        <div><dt>With contacts</dt><dd>{{ coverage.accounts_with_contacts }}</dd></div>
+        <div><dt>With upcoming events</dt><dd>{{ coverage.upcoming }}</dd></div>
+      </dl>
+    </div>
+  </section>
+  <section class="source-panel workflow-panel">
+    <header class="panel-header"><h2>Rep workload</h2></header>
+    <ul class="workflow-list workflow-panel-body">
+      {% for rep in workload %}
+        <li><strong>{{ rep.name }}</strong> - {{ rep.accounts }} accounts, {{ rep.open_count }} open tasks, {{ rep.overdue }} overdue
+          {% if current_user.role == 'admin' %}
+            <form class="workflow-form" method="post" action="{{ url_for('growth_ops.set_quota', user_id=rep.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label>Daily credits <input type="number" name="quota" min="0" value="{{ rep.daily_credit_quota }}" required></label>
+              <button type="submit">Save quota</button>
+            </form>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+  <section class="source-panel workflow-panel">
+    <header class="panel-header"><h2>Source funnel</h2></header>
+    <div class="workflow-panel-body">
+      <p>Each account appears once per source. An account can contribute to multiple source rows.</p>
+      <ul class="workflow-list">
+        {% for row in funnel %}
+          <li><strong>{{ row.source_name }}</strong> - {{ row.discovered }} discovered, {{ row.scored }} scored,
+            {{ row.assigned }} assigned, {{ row.worked }} worked, {{ row.positive }} positive,
+            {{ row.delivered }} delivered, {{ row.credits }} credits
+            {% if row.positive %} ({{ (row.credits / row.positive)|round(2) }} per positive){% endif %}
+          </li>
+        {% else %}<li>No linked source data.</li>{% endfor %}
+      </ul>
+      {% if current_user.role == 'admin' %}
+        <form class="workflow-form" method="post" action="{{ url_for('growth_ops.export_source_funnel') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Download source report</button>
+        </form>
+      {% endif %}
+    </div>
+  </section>
+  <section class="source-panel workflow-panel" aria-labelledby="bulk-qualification-heading">
+    <header class="panel-header"><h2 id="bulk-qualification-heading">Bulk qualification</h2></header>
+    <div class="workflow-panel-body">
+      <p>Score new accounts and apply saved scores to unassigned accounts without using enrichment credits.</p>
+      {% if qualification_active %}
+        <p>A qualification job is active. Refresh to see its progress.</p>
+      {% else %}
+        <form class="workflow-form" method="post" action="{{ url_for('growth_ops.queue_qualification') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Source <select name="scope">
+            {% for scope, name in qualification_scopes.items() %}<option value="{{ scope }}">{{ name }}</option>{% endfor %}
+          </select></label>
+          <button type="submit">Queue qualification</button>
+        </form>
+      {% endif %}
+      <ul class="workflow-list">
+        {% for job in qualification_jobs %}
+          <li><strong>{{ qualification_scopes[job.scope] }} - {{ 'Completed' if job.state == 'done' else job.state|capitalize }}</strong>
+            <p>{{ job.processed }} of {{ job.total }} processed, {{ job.scored }} newly scored,
+              {{ job.qualified }} passed fit checks, {{ job.suppressed }} suppressed</p>
+            {% if job.error %}<p class="workflow-notice is-error">{{ job.error }}</p>{% endif %}
+            {% if job.state == 'failed' and not qualification_active %}
+              <form class="workflow-form" method="post" action="{{ url_for('growth_ops.retry_qualification', job_id=job.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Retry qualification</button>
+              </form>
+            {% endif %}
+          </li>
+        {% else %}<li>No qualification jobs yet.</li>{% endfor %}
+      </ul>
+    </div>
+  </section>
+  {% if current_user.role == 'admin' %}
+    <section class="source-panel workflow-panel">
+      <header class="panel-header"><h2>Qualification settings</h2></header>
+      <form class="workflow-form workflow-panel-body" method="post" action="{{ url_for('growth_ops.edit_rules') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Conference terms <input name="terms" value="{{ config.conference_terms|join(', ') }}" required></label>
+        <label>Platform domains (domain=name, one per line)
+          <textarea name="platform_domains" rows="6">{% for domain, name in config.platform_domains.items() %}{{ domain }}={{ name }}{{ '\n' }}{% endfor %}</textarea>
+        </label>
+        <label>Daily automatic credit budget <input type="number" name="daily_auto_budget" min="0" value="{{ config.daily_auto_budget }}" required></label>
+        <label><input type="checkbox" name="auto_enabled" value="1"{% if config.auto_enabled %} checked{% endif %}> Queue eligible demo searches automatically on qualification</label>
+        <button type="submit">Save settings</button>
+      </form>
+    </section>
+  {% endif %}
+  <section class="source-panel workflow-panel">
+    <header class="panel-header"><h2>Enrichment queue</h2></header>
+    <form class="workflow-filters" method="get">
+      <label>Search <input name="search" value="{{ search }}"></label>
+      <label>State <select name="filter">
+        {% for state in ['all', 'queued', 'processing', 'failed', 'done', 'blocked'] %}<option value="{{ state }}"{% if state == selected %} selected{% endif %}>{{ state|capitalize }}</option>{% endfor %}
+      </select></label>
+      <label>Sort by <select name="sort"><option value="recent">Recent</option><option value="account"{% if sort == 'account' %} selected{% endif %}>Account</option></select></label>
+      <label>Rows <select name="page_size">{% for size in [25, 50, 100] %}<option{% if pagination.size == size %} selected{% endif %}>{{ size }}</option>{% endfor %}</select></label>
+      <button type="submit">Apply</button>
+    </form>
+    <ul class="workflow-list workflow-panel-body">
+      {% for item in items %}
+        <li><a class="text-link" href="{{ url_for('account_detail', account_id=item.account_id) }}">{{ item.name }}</a>
+          {{ item.action|replace('_', ' ') }} - {{ item.state }} · {{ item.actor }}
+          {% if item.state == 'failed' %}
+            <p>{{ item.error }}</p>
+            <form class="workflow-form" method="post" action="{{ url_for('growth_ops.retry', job_id=item.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Retry</button>
+            </form>
+          {% endif %}
+        </li>
+      {% else %}<li>No enrichment jobs match.</li>{% endfor %}
+    </ul>
+    {{ page_links(pagination) }}
+  </section>
+{% endblock %}

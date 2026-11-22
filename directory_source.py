@@ -68,6 +68,7 @@ SAMPLE_LISTINGS = (
     ),
 )
 
+RESEARCH_FIELDS = ("contact_person", "contact_title", "phone", "conventions_events")
 RAW_FIELDS = (
     "name",
     "type",
@@ -81,6 +82,7 @@ RAW_FIELDS = (
     "last_updated",
     "website",
     "source_url",
+    *RESEARCH_FIELDS,
 )
 POSTAL_LOCATION = re.compile(
     r",\s*(?P<city>[^,]+),\s*(?P<state>[A-Z]{2})\s*"
@@ -89,6 +91,13 @@ POSTAL_LOCATION = re.compile(
     re.IGNORECASE,
 )
 COUNTRY_NAMES = {"US": "United States", "CA": "Canada"}
+
+
+def listing_research(row: dict) -> dict[str, str]:
+    return {
+        field: value.strip() for field in RESEARCH_FIELDS
+        if isinstance(value := row.get(field), str) and value.strip()
+    }
 
 
 def _location(row: dict) -> tuple[str | None, str | None, str | None]:
@@ -149,7 +158,9 @@ def _make_record(selection: ListingSelection, row: dict) -> dict:
             "website": row.get("website"),
             "source_url": source_url,
             "host": host,
+            "last_updated": row.get("last_updated"),
             "identity_evidence": selection.reason,
+            **listing_research(row),
         },
     }
 

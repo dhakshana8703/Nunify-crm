@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'workflow_ui.html' import source_tags %}
 
 {% block title %}{% if account %}{{ account.name }} | {% endif %}Nunify CRM{% endblock %}
 
@@ -11,16 +12,40 @@
           <p class="identity-label">{{ account.organization_type|default('Account', true)|capitalize }}</p>
           <h1>{{ account.name }}</h1>
           {% if account.domain %}<p class="account-domain">{{ account.domain }}</p>{% endif %}
+          {{ source_tags(account_sources) }}
         </div>
       </div>
       <dl class="account-meta">
         <div><dt>Account ID</dt><dd>{{ account.id }}</dd></div>
-        <div><dt>Account owner</dt><dd>{{ account.owner|default('Unassigned', true) }}</dd></div>
-        <div><dt>Event platform</dt><dd>{% if events %}Cvent{% else %}Unknown{% endif %}</dd></div>
+        <div><dt>Account owner</dt><dd>{% if work is defined %}{{ work.owner_name or 'Unassigned' }}{% else %}{{ account.owner|default('Unassigned', true) }}{% endif %}</dd></div>
+        <div><dt>Event platform</dt><dd>{{ profile.platform }}{% if profile.platform_confidence %} <small>({{ profile.platform_confidence }})</small>{% endif %}</dd></div>
+        {% if profile.country %}<div><dt>Organization country</dt><dd>{{ profile.country }}</dd></div>{% endif %}
+        {% if profile.members %}<div><dt>Directory members</dt><dd>{{ profile.members }}</dd></div>{% endif %}
+        {% if profile.fit_score is not none %}<div><dt>Fit score</dt><dd>{{ profile.fit_score }}</dd></div>{% endif %}
       </dl>
+      {% if current_user.role == 'admin' %}
+        <details class="event-details">
+          <summary>Edit organization type</summary>
+          <form class="workflow-form" method="post" action="{{ url_for('account_profile.update_type', account_id=account.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="previous_type" value="{{ account.organization_type }}">
+            <label>Type <select name="organization_type">
+              {% for kind in profile.organization_types %}<option{% if account.organization_type == kind %} selected{% endif %}>{{ kind }}</option>{% endfor %}
+            </select></label>
+            <div><button class="button button-small" type="submit">Save type</button></div>
+          </form>
+        </details>
+      {% endif %}
     </header>
 
-    <div class="source-grid">
+    {% if account_naming %}{% include 'account_names_panel.html' %}{% endif %}
+    {% if work is defined %}{% include 'workflow_account.html' %}{% endif %}
+    {% if growth is defined %}{% include 'growth_account.html' %}{% endif %}
+    {% if sales is defined %}
+      <div class="sales-workflow">{% include 'sales_account.html' %}</div>
+    {% endif %}
+
+    <div class="source-grid" id="source-evidence">
       <section class="source-panel events-panel" aria-labelledby="events-heading">
         <header class="panel-header">
           <div>
@@ -59,6 +84,7 @@
                 {% if event.start_date and event.start_date_iso %}<div><dt>Original start date</dt><dd>{{ event.start_date }}</dd></div>{% endif %}
                 {% if event.end_date %}<div><dt>Original end date</dt><dd>{{ event.end_date }}</dd></div>{% endif %}
                 {% if event.venue_name %}<div><dt>Venue</dt><dd>{{ event.venue_name }}</dd></div>{% endif %}
+                {% if event.scrape_date %}<div><dt>Source record date</dt><dd><time datetime="{{ event.scrape_date }}">{{ (event.scrape_date|string)[:10] }}</time></dd></div>{% endif %}
               </dl>
               <a class="text-link" href="{{ url_for('api_get_event', event_id=event.id) }}">View event record</a>
             </details>
@@ -88,6 +114,14 @@
               <div><dt>Membership</dt><dd>{{ listing.members|default('Unavailable', true) }}</dd></div>
               <div><dt>Location</dt><dd>{{ location|default('Unavailable', true) }}</dd></div>
               {% if listing.address %}<div class="full-width"><dt>Source address</dt><dd>{{ listing.address }}</dd></div>{% endif %}
+              {% if listing.contact_person %}<div><dt>Listed contact</dt><dd>{{ listing.contact_person }}</dd></div>{% endif %}
+              {% if listing.contact_title %}<div><dt>Listed contact role</dt><dd>{{ listing.contact_title }}</dd></div>{% endif %}
+              {% if listing.phone %}<div><dt>Listed organization phone</dt><dd>{{ listing.phone }}</dd></div>{% endif %}
+              {% if listing.conventions_events %}<div class="full-width"><dt>Convention notes</dt><dd>{{ listing.conventions_events }}</dd></div>{% endif %}
+              {% if listing.observed_at or listing.last_updated %}
+                {% set recorded = listing.observed_at or listing.last_updated %}
+                <div><dt>Source record date</dt><dd><time datetime="{{ recorded }}">{{ (recorded|string)[:10] }}</time></dd></div>
+              {% endif %}
               {% if website %}
                 <div class="full-width"><dt>Listed website</dt><dd>
                   {% if website.startswith(('https://', 'http://')) %}
@@ -115,6 +149,28 @@
         {% endfor %}
       </section>
     </div>
+    {% if additional_evidence %}
+      <section class="source-panel additional-evidence" aria-labelledby="additional-evidence-heading">
+        <header class="panel-header"><h2 id="additional-evidence-heading">Additional source records</h2></header>
+        <ul class="workflow-list">
+          {% for evidence in additional_evidence %}
+            {% set evidence_url = evidence.source_url or '' %}
+            <li class="workflow-row">
+              <div>
+                <h3>{{ evidence.source_name }}</h3>
+                <p>Record {{ evidence.external_id }}</p>
+                {% if evidence_url.startswith(('https://', 'http://')) %}<p><a class="text-link" href="{{ evidence_url }}" target="_blank" rel="noopener noreferrer">View source record</a></p>{% endif %}
+                <details class="event-details">
+                  <summary>Original values</summary>
+                  <pre class="original-evidence" tabindex="0">{{ evidence.raw|tojson(indent=2) }}</pre>
+                </details>
+              </div>
+              <time datetime="{{ evidence.observed_at }}">{{ (evidence.observed_at|string)[:10] }}</time>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
   {% else %}
     <header class="page-header"><h1>Accounts</h1></header>
     <p class="empty-state standalone">Import the saved demo records to view accounts and their source evidence.</p>

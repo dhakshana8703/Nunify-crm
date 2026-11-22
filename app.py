@@ -1,22 +1,71 @@
-"""Read-only Flask UI for the local two-source demo."""
+"""Nunify CRM web application."""
 
-from flask import Flask, abort, g, jsonify, render_template, request
+import argparse
+import os
+import secrets
+from contextlib import closing
+from pathlib import Path
 
-from crm_store import (
-    DEFAULT_DB, account_summaries, connect, directory_listings, initialize, record_evidence,
-)
+from flask import Flask, abort, g, jsonify, redirect, render_template, request, url_for
+from werkzeug.exceptions import HTTPException
+
+import account_names
+import account_profile
+import campaigns
+import cvent_contacts
+import growth_ops
+import sales_extensions
+import scraper_ingest
+import source_ops
+import source_review
+import workflow_store
+import workflow_web
+from crm_store import DEFAULT_DB, connect, directory_listings, initialize, record_evidence
 from cvent_reads import get_all_cvent_events, get_cvent_event_by_id
 
 
-def create_app(database_path=DEFAULT_DB):
+def create_app(database_path=DEFAULT_DB, *, demo=False):
     app = Flask(__name__)
+    app.config.update(
+        DATABASE=database_path,
+        SECRET_KEY=os.environ.get("CRM_SECRET_KEY") or secrets.token_hex(32),
+        SESSION_COOKIE_SAMESITE="Lax",
+        MAX_CONTENT_LENGTH=12 * 1024 * 1024,
+        MACHINE_ENDPOINTS=scraper_ingest.API_ENDPOINTS,
+        PLANNING_MONTHS_MIN=int(os.environ.get("CRM_PLANNING_MONTHS_MIN", "4")),
+        PLANNING_MONTHS_MAX=int(os.environ.get("CRM_PLANNING_MONTHS_MAX", "9")),
+    )
     initialize(database_path)
+    with closing(connect(database_path)) as connection:
+        account_names.initialize(connection)
+        workflow_store.initialize(connection)
+        cvent_contacts.initialize(connection)
+        sales_extensions.initialize(connection)
+        source_ops.initialize(connection)
+        scraper_ingest.initialize(connection)
+        growth_ops.initialize(connection)
+        campaigns.initialize(connection)
+        if demo:
+            workflow_store.seed_demo_users(connection)
+    app.register_blueprint(workflow_web.bp)
+    app.register_blueprint(account_names.bp)
+    app.register_blueprint(account_profile.bp)
+    app.register_blueprint(sales_extensions.bp)
+    app.register_blueprint(source_ops.bp)
+    app.register_blueprint(scraper_ingest.bp)
+    app.register_blueprint(source_review.bp)
+    app.register_blueprint(growth_ops.bp)
+    app.register_blueprint(campaigns.bp)
+    app.before_request(workflow_web.authenticate_request)
+    app.jinja_env.globals.update(csrf_token=workflow_web.csrf_token, view_endpoints=app.view_functions)
 
-    def db():
-        if "db" not in g:
-            g.db = connect(database_path, read_only=True)
-            g.db.execute("BEGIN")
-        return g.db
+    db = workflow_web.db
+
+    @app.after_request
+    def cache_policy(response):
+        if request.endpoint != "static":
+            response.cache_control.no_store = True
+        return response
 
     @app.teardown_appcontext
     def close_db(_error):
@@ -24,43 +73,58 @@ def create_app(database_path=DEFAULT_DB):
         if connection is not None:
             connection.close()
 
+    @app.context_processor
     def workspace():
-        accounts = account_summaries(db())
+        user = g.get("crm_user")
         return {
-            "accounts": accounts,
+            "current_user": user,
+            "accounts": workflow_web.readable_accounts()[:8] if user and user["role"] == "sdr" else [],
             "review_count": db().execute("""
                 SELECT COUNT(*) FROM source_records WHERE account_id IS NULL
-            """).fetchone()[0],
+            """).fetchone()[0] if user and user["role"] in workflow_web.STAFF else None,
         }
 
-    def show_account(context, account):
+    @app.errorhandler(HTTPException)
+    def show_error(error):
+        if request.path.startswith("/api/"):
+            return jsonify(error=error.name, message=error.description), error.code
+        return render_template("workflow_error.html", title=error.name, message=error.description), error.code
+
+    def show_account(account):
         events = []
         listings = []
+        context = {}
         if account:
             account_id = account["id"]
             events = get_all_cvent_events(db(), account_id=account_id, sort_by="date")["events"]
             listings = directory_listings(db(), account_id)
+            context = workflow_web.activity_context(account)
+            context["account_naming"] = account_names.account_context(db(), account_id, g.crm_user)
+            context["profile"] = account_profile.context(db(), account, listings)
+            contact_evidence = {}
+            for item in cvent_contacts.evidence_for_account(db(), account_id):
+                contact_evidence.setdefault(item["person_id"], []).append(item)
+            context["cvent_contact_evidence"] = contact_evidence
+            account["owner"] = account["owner_name"] or account["owner"]
+            context["sales"] = sales_extensions.account_context(db(), account_id, g.crm_user)
+            context["growth"] = growth_ops.account_context(db(), account_id, g.crm_user)
+            context["additional_evidence"] = source_ops.evidence_for_account(db(), account_id)
+            context["account_sources"] = source_ops.account_sources(db(), (account_id,)).get(account_id, ())
         return render_template(
             "account.html", **context, account=account, events=events, listings=listings,
         )
 
     @app.get("/")
     def home():
-        context = workspace()
-        accounts = context["accounts"]
-        account = next((row for row in accounts if row["identity_key"] == "aarp"), None)
-        return show_account(context, account or (accounts[0] if accounts else None))
+        return redirect(url_for(workflow_web.ROLE_HOME[g.crm_user["role"]]))
 
     @app.get("/accounts/<int:account_id>")
     def account_detail(account_id):
-        context = workspace()
-        account = next((row for row in context["accounts"] if row["id"] == account_id), None)
-        if account is None:
-            abort(404)
-        return show_account(context, account)
+        return show_account(workflow_web.account_required(account_id))
 
     @app.get("/review")
     def review():
+        workflow_web.staff_required()
         search = request.args.get("search", "").strip()
         status = request.args.get("status", "all")
         sort = request.args.get("sort", "name")
@@ -87,13 +151,21 @@ def create_app(database_path=DEFAULT_DB):
         page = min(pages, max(1, request.args.get("page", 1, type=int)))
         offset = (page - 1) * page_size
         return render_template(
-            "review.html", **workspace(), items=items[offset:offset + page_size],
+            "review.html", items=items[offset:offset + page_size],
             search=search, host_filter=status, sort=sort, page_size=page_size,
             page=page, pages=pages, total=total,
         )
 
     @app.get("/api/events")
     def api_get_events():
+        if g.crm_user["role"] == "ae":
+            abort(403)
+        account_id = request.args.get("account_id", type=int)
+        if account_id is not None:
+            workflow_web.account_required(account_id)
+        scoped_ids = None
+        if g.crm_user["role"] == "sdr" and account_id is None:
+            scoped_ids = [row["id"] for row in workflow_web.readable_accounts()]
         return jsonify(get_all_cvent_events(
             db(),
             limit=max(1, min(100, request.args.get("limit", 25, type=int))),
@@ -102,7 +174,7 @@ def create_app(database_path=DEFAULT_DB):
             status_filter=request.args.get("status", "all"),
             sort_by=request.args.get("sort_by", "default"),
             sort_dir=request.args.get("sort_dir", "asc"),
-            account_id=request.args.get("account_id", type=int),
+            account_id=account_id, scoped_ids=scoped_ids,
         ))
 
     @app.get("/api/events/<int:event_id>")
@@ -110,6 +182,7 @@ def create_app(database_path=DEFAULT_DB):
         event = get_cvent_event_by_id(db(), event_id)
         if event is None:
             return jsonify(error="Event not found"), 404
+        workflow_web.account_required(event["company_id"])
         event["evidence"] = record_evidence(db(), "cvent", event["source_id"])
         return jsonify(event)
 
@@ -118,10 +191,19 @@ def create_app(database_path=DEFAULT_DB):
         record = record_evidence(db(), "directory", source_id.upper())
         if record is None:
             return jsonify(error="Directory listing not found"), 404
+        if record["account_id"] is None:
+            workflow_web.staff_required()
+        else:
+            workflow_web.account_required(record["account_id"])
         return jsonify(record)
 
     return app
 
 
 if __name__ == "__main__":
-    create_app().run(host="127.0.0.1", port=5000)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--demo", action="store_true", help="Seed synthetic local users.")
+    args = parser.parse_args()
+    create_app(args.db, demo=args.demo).run(host="127.0.0.1", port=args.port)

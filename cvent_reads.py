@@ -61,6 +61,7 @@ def _event_order(sort_by, sort_dir):
 
 def get_all_cvent_events(
     connection, limit=50, offset=0, search="", status_filter="all", sort_by="default", sort_dir="asc", account_id=None,
+    scoped_ids=None,
 ):
     """Fetch a page of legacy Cvent event records from the local CRM projection."""
     conditions = []
@@ -77,6 +78,9 @@ def get_all_cvent_events(
     if account_id is not None:
         conditions.append("company_id = :account_id")
         params["account_id"] = account_id
+    if scoped_ids is not None:
+        conditions.append("company_id IN (SELECT value FROM json_each(:scoped_ids))")
+        params["scoped_ids"] = json.dumps(scoped_ids)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     total = connection.execute(f"SELECT COUNT(*) FROM cvent_read {where}", params).fetchone()[0]

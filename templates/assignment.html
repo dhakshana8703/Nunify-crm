@@ -1,0 +1,218 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import csrf, page_size, page_links, label with context %}
+
+{% block title %}Assignments | Nunify CRM{% endblock %}
+
+{% block content %}
+  {% if allocation is defined %}
+    <header class="page-header"><h1>Preview round-robin allocation</h1></header>
+    <section class="source-panel" aria-labelledby="allocation-heading">
+      <header class="panel-header">
+        <h2 id="allocation-heading">Proposed assignments</h2>
+        <span class="count-tag">{{ allocation_count }} accounts</span>
+      </header>
+      <div class="workflow-panel-body">
+        <p>Each rep can own up to {{ allocation_cap }} accounts. The rotation starts with the least-loaded selected rep.</p>
+        {% if allocation_unallocated %}
+          <p>{{ allocation_unallocated }} selected {{ 'account will' if allocation_unallocated == 1 else 'accounts will' }} stay unassigned because the selected reps have reached the cap.</p>
+        {% endif %}
+      </div>
+      <ul class="workflow-list">
+        {% for group in allocation_groups %}
+          <li class="workflow-row">
+            <div>
+              <h3>{{ group.name }}</h3>
+              <p>{{ group.account_count }} currently owned, {{ group.accounts|length }} proposed</p>
+              {% if group.accounts %}
+                <ul>
+                  {% for account in group.accounts %}
+                    <li>{{ account.name }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      <form class="workflow-filters" action="{{ url_for('workflow.assign_round_robin', **assignment_filters) }}" method="post">
+        {{ csrf() }}
+        {% if allocation_count %}
+          <input type="hidden" name="allocation" value="{{ allocation }}">
+          <button type="submit" class="button button-primary">Confirm allocation</button>
+        {% endif %}
+        <a class="button" href="{{ url_for('workflow.assignment', **assignment_filters) }}">Back to assignments</a>
+      </form>
+    </section>
+  {% else %}
+  <header class="page-header"><h1>Assignments</h1></header>
+  {% if reps %}
+    <section class="source-panel workflow-section" aria-labelledby="workload-heading">
+      <header class="panel-header"><h2 id="workload-heading">Rep workload</h2></header>
+      <div class="workload-grid">
+        {% for rep in reps %}
+          <div>
+            <h3>{{ rep.name }}</h3>
+            <dl class="assignment-details">
+              <div><dt>Owned</dt><dd>{{ rep.account_count }}</dd></div>
+              <div><dt>Open tasks</dt><dd>{{ rep.open_tasks }}</dd></div>
+              <div><dt>Outbound touches - 7 days</dt><dd>{{ rep.touches }}</dd></div>
+              {% if rep.overdue_count is defined %}<div><dt>Overdue</dt><dd>{{ rep.overdue_count }}</dd></div>{% endif %}
+            </dl>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+  <section class="source-panel" aria-labelledby="assignments-heading">
+    <header class="panel-header">
+      <h2 id="assignments-heading">Account owners</h2>
+      <span class="count-tag" data-assignment-count role="status">{{ pagination.total }} {{ 'account' if pagination.total == 1 else 'accounts' }}</span>
+    </header>
+    <form class="workflow-filters" action="{{ url_for('workflow.assignment') }}" method="get" data-assignment-search>
+      <label class="company-picker">Company
+        <select name="company" aria-controls="assignment-results">
+          <option value="">All companies</option>
+          {% for account in company_options %}
+            <option value="{{ account.id }}"{% if selected_company == account.id %} selected{% endif %}>{{ account.name }}{% if account.domain %} - {{ account.domain }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="grow">Find a company
+        <input type="search" name="search" value="{{ search }}" placeholder="Company name or domain" autocomplete="off" aria-controls="assignment-results">
+      </label>
+      <label>Owner status
+        <select name="filter">
+          {% for value, text in (('all', 'All accounts'), ('unassigned', 'Unassigned'), ('qualified_unassigned', 'Qualified and unassigned'), ('assigned', 'Assigned')) %}
+            <option value="{{ value }}"{% if request.args.get('filter', 'all') == value %} selected{% endif %}>{{ text }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Owner
+        <select name="owner">
+          {% for value, text in owner_options %}
+            <option value="{{ value }}"{% if owner == value %} selected{% endif %}>{{ text }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Stage
+        <select name="stage">
+          <option value="">Any stage</option>
+          {% for value in stage_options %}
+            <option value="{{ value }}"{% if stage == value %} selected{% endif %}>{{ label(value) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Source
+        <select name="source">
+          {% for value, text in source_options %}
+            <option value="{{ value }}"{% if source == value %} selected{% endif %}>{{ text }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Organization type
+        <select name="org_type">
+          <option value="">All types</option>
+          {% for name in organization_types %}
+            <option value="{{ name }}"{% if organization_type == name %} selected{% endif %}>{{ name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Sort by
+        <select name="sort">
+          {% for value, text in (('name', 'Name'), ('fit_score', 'Fit score'), ('next_event', 'Next event'), ('stage', 'Stage')) %}
+            <option value="{{ value }}"{% if request.args.get('sort', 'name') == value %} selected{% endif %}>{{ text }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {{ page_size(pagination) }}
+      <label class="assignment-check-label"><input type="checkbox" name="show_suppressed" value="1"{% if show_suppressed %} checked{% endif %}> Show suppressed</label>
+      <button type="submit" class="button">Apply</button>
+    </form>
+    <div id="assignment-results" data-assignment-results>
+    {% set assignable_items = items|rejectattr('blocked')|list %}
+    {% if reps and assignable_items %}
+      <form id="bulk-assignment-form" class="workflow-filters" action="{{ url_for('workflow.assign_bulk', **assignment_filters) }}" method="post">
+        {{ csrf() }}
+        <label>Assign selected accounts to
+          <select name="owner_id" required>
+            <option value="">Select an SDR</option>
+            {% for rep in reps %}<option value="{{ rep.id }}">{{ rep.name }}</option>{% endfor %}
+          </select>
+        </label>
+        {% if assignable_items|rejectattr('owner_id')|list %}
+          <label class="assignment-check-label"><input type="checkbox" name="assign_page" value="yes"> Include all unassigned accounts on this page</label>
+        {% endif %}
+        {% if assignable_items|selectattr('owner_id')|list %}
+          <label class="assignment-check-label"><input type="checkbox" name="allow_transfer" value="yes"> Allow transfers for selected accounts</label>
+        {% endif %}
+        <button type="submit" class="button button-primary">Apply bulk assignment</button>
+      </form>
+      {% if assignable_items|rejectattr('owner_id')|list %}
+        <details class="workflow-panel-body">
+          <summary>Distribute across SDRs</summary>
+          <p>Select unassigned accounts below or include all unassigned accounts on this page. Choose the participating reps and their maximum total owned accounts.</p>
+          <div class="workflow-filters">
+            {% for rep in reps %}
+              <label class="assignment-check-label">
+                <input type="checkbox" name="rep_id" value="{{ rep.id }}" form="bulk-assignment-form">
+                {{ rep.name }} ({{ rep.account_count }} owned)
+              </label>
+            {% endfor %}
+            <label>Max accounts per SDR
+              <input type="number" name="cap" min="1" form="bulk-assignment-form">
+            </label>
+            <button type="submit" class="button" form="bulk-assignment-form" formnovalidate
+                    formaction="{{ url_for('workflow.assign_round_robin', **assignment_filters) }}">Preview allocation</button>
+          </div>
+        </details>
+      {% endif %}
+    {% endif %}
+    <ul class="workflow-list">
+      {% for item in items %}
+        <li class="workflow-row assignment-result">
+          <div class="assignment-account">
+            {% if reps and not item.blocked %}
+              <input class="assignment-check" type="checkbox" name="account" value="{{ item.id }}:{{ item.revision }}" form="bulk-assignment-form" aria-label="Select {{ item.name }}">
+              {% if not item.owner_id %}
+                <input type="hidden" name="unassigned_on_page" value="{{ item.id }}:{{ item.revision }}" form="bulk-assignment-form">
+              {% endif %}
+            {% endif %}
+            <div>
+              <h3><a class="text-link" href="{{ url_for('account_detail', account_id=item.id) }}">{{ item.name }}</a></h3>
+              <p>{{ item.domain or 'Domain unavailable' }} · {{ item.organization_type }}</p>
+              {% if item.blocked %}<p><span class="workflow-badge is-blocked">Suppressed</span> {{ item.blocked }}</p>{% endif %}
+              <dl class="assignment-details">
+                <div><dt>Stage</dt><dd>{{ label(item.stage) }}</dd></div>
+                <div><dt>Current owner</dt><dd>{{ item.owner_name or 'Unassigned' }}</dd></div>
+                {% if item.fit_score is not none %}<div><dt>Fit score</dt><dd>{{ item.fit_score }}</dd></div>{% endif %}
+                {% if item.evidence_labels %}<div><dt>Source</dt><dd>{{ item.evidence_labels|join(' · ') }}</dd></div>{% endif %}
+                {% if item.next_event %}<div><dt>Next event</dt><dd><time datetime="{{ item.next_event }}">{{ item.next_event }}</time></dd></div>{% endif %}
+              </dl>
+            </div>
+          </div>
+          {% if reps and not item.blocked %}
+            <form class="assign-form" action="{{ url_for('workflow.assign', account_id=item.id, **assignment_filters) }}" method="post">
+              {{ csrf() }}
+              <input type="hidden" name="revision" value="{{ item.revision }}">
+              <label>New owner
+                <select name="owner_id" aria-label="New owner for {{ item.name }}" required>
+                  <option value="">Select an SDR</option>
+                  {% for rep in reps %}
+                    {% if item.owner_id != rep.id %}<option value="{{ rep.id }}">{{ rep.name }}</option>{% endif %}
+                  {% endfor %}
+                </select>
+              </label>
+              <button type="submit" class="button button-primary">{{ 'Transfer' if item.owner_name else 'Assign' }}</button>
+            </form>
+          {% endif %}
+        </li>
+      {% else %}
+        <li class="empty-state">No accounts match these filters.</li>
+      {% endfor %}
+    </ul>
+    {{ page_links(pagination) }}
+    </div>
+  </section>
+  <script defer src="{{ url_for('static', filename='workflow.js') }}"></script>
+  {% endif %}
+{% endblock %}

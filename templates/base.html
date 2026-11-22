@@ -22,9 +22,28 @@
           <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.my_accounts' %} is-current{% endif %}" href="{{ url_for('workflow.my_accounts') }}"{% if request.endpoint == 'workflow.my_accounts' %} aria-current="page"{% endif %}>My Accounts</a>
         {% elif current_user and current_user.role in ('manager', 'admin') %}
           <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.assignment' %} is-current{% endif %}" href="{{ url_for('workflow.assignment') }}"{% if request.endpoint == 'workflow.assignment' %} aria-current="page"{% endif %}>Assignments</a>
+          <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.today' %} is-current{% endif %}" href="{{ url_for('workflow.today') }}"{% if request.endpoint == 'workflow.today' %} aria-current="page"{% endif %}>Team queue</a>
+          <a class="nav-link workflow-nav{% if request.blueprint == 'source_review' %} is-current{% endif %}" href="{{ url_for('source_review.index') }}"{% if request.blueprint == 'source_review' %} aria-current="page"{% endif %}>Source review</a>
+          <a class="nav-link workflow-nav{% if request.blueprint == 'account_names' %} is-current{% endif %}" href="{{ url_for('account_names.index') }}">Account name review</a>
+          <a class="nav-link workflow-nav{% if request.endpoint == 'growth_ops.index' %} is-current{% endif %}" href="{{ url_for('growth_ops.index') }}">Operations</a>
+          {% if current_user.role == 'admin' %}
+            <a class="nav-link workflow-nav{% if request.endpoint == 'growth_ops.suppression' %} is-current{% endif %}" href="{{ url_for('growth_ops.suppression') }}">Suppression</a>
+          {% endif %}
         {% endif %}
-        {% if current_user is not defined or not current_user or current_user.role != 'ae' %}
-        <div class="nav-heading">Accounts <span>{{ accounts|default([])|length }}</span></div>
+        {% if current_user and 'sales_extensions.handoffs' in view_endpoints|default([]) %}
+          <a class="nav-link workflow-nav{% if request.endpoint == 'sales_extensions.handoffs' %} is-current{% endif %}" href="{{ url_for('sales_extensions.handoffs') }}"{% if request.endpoint == 'sales_extensions.handoffs' %} aria-current="page"{% endif %}>Handoffs</a>
+        {% endif %}
+        {% if current_user and current_user.role in ('admin', 'manager', 'sdr') and 'workflow.people' in view_endpoints|default([]) %}
+          <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.people' %} is-current{% endif %}" href="{{ url_for('workflow.people') }}"{% if request.endpoint == 'workflow.people' %} aria-current="page"{% endif %}>People</a>
+        {% endif %}
+        {% if current_user and current_user.role != 'ae' and 'campaigns.index' in view_endpoints|default([]) %}
+          <a class="nav-link workflow-nav{% if request.blueprint == 'campaigns' %} is-current{% endif %}" href="{{ url_for('campaigns.index') }}"{% if request.blueprint == 'campaigns' %} aria-current="page"{% endif %}>Campaigns</a>
+        {% endif %}
+        {% if current_user and current_user.role == 'admin' and 'source_ops.index' in view_endpoints|default([]) %}
+          <a class="nav-link workflow-nav{% if request.blueprint == 'source_ops' %} is-current{% endif %}" href="{{ url_for('source_ops.index') }}"{% if request.blueprint == 'source_ops' %} aria-current="page"{% endif %}>Sources</a>
+        {% endif %}
+        {% if current_user and current_user.role == 'sdr' and accounts %}
+        <div class="nav-heading">Assigned accounts</div>
         <ul class="account-nav">
           {% for entry in accounts|default([]) %}
             {% set current = account and account.id == entry.id %}
@@ -37,8 +56,6 @@
                 </span>
               </a>
             </li>
-          {% else %}
-            <li class="sidebar-empty">No imported accounts</li>
           {% endfor %}
         </ul>
         {% endif %}

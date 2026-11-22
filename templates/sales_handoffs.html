@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}AE handoffs | Nunify CRM{% endblock %}
+{% block content %}
+  <header class="page-header"><h1>AE handoffs</h1></header>
+  <form method="get" class="workflow-filters">
+    <label>Search<input type="search" name="search" value="{{ filters.search }}" placeholder="Account, contact, or AE"></label>
+    {% if g.crm_user.role != 'ae' %}
+      <label>Status
+        <select name="status">
+          <option value="">All statuses</option>
+          {% for value in ('pending', 'delivered', 'failed') %}<option value="{{ value }}"{% if filters.status == value %} selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
+        </select>
+      </label>
+    {% endif %}
+    <label>Sort<select name="sort">
+      <option value="recent">Newest first</option>
+      <option value="oldest"{% if filters.sort == 'oldest' %} selected{% endif %}>Oldest first</option>
+    </select></label>
+    <label>Per page<select name="size">
+      {% for size in (25, 50, 100) %}<option value="{{ size }}"{% if filters.size == size %} selected{% endif %}>{{ size }}</option>{% endfor %}
+    </select></label>
+    <button class="button button-primary" type="submit">Apply</button>
+  </form>
+  <section class="source-panel workflow-section" aria-label="Handoff results">
+    {% for handoff in handoffs %}
+      <article class="event-row">
+        <h2><a class="text-link" href="{{ url_for('sales_extensions.handoff_detail', handoff_id=handoff.id) }}">{{ handoff.account_name }} · {{ handoff.person_name }}</a></h2>
+        <p>{{ outcomes[handoff.outcome] }} · {{ handoff.ae_name }} · {{ 'Pending delivery' if handoff.status in ('pending', 'delivering') else handoff.status|capitalize }}</p>
+      </article>
+    {% else %}
+      <p class="empty-state">No handoffs match your filters.</p>
+    {% endfor %}
+  </section>
+  {% if pages > 1 %}
+    <nav class="pagination" aria-label="Handoff pages">
+      {% if page > 1 %}<a href="{{ url_for('sales_extensions.handoffs', page=page - 1, **filters) }}">Previous</a>{% endif %}
+      <span>Page {{ page }} of {{ pages }}</span>
+      {% if page < pages %}<a href="{{ url_for('sales_extensions.handoffs', page=page + 1, **filters) }}">Next</a>{% endif %}
+    </nav>
+  {% endif %}
+{% endblock %}

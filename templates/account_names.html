@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import csrf, page_size, page_links with context %}
+{% block title %}Account names - Nunify CRM{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1>Account names</h1>
+</header>
+
+{% if current_user.role == 'admin' and exact_matches %}
+  <form class="workflow-filters" method="post" action="{{ url_for('account_names.record_provenance') }}">
+    {{ csrf() }}
+    <p>{{ exact_matches }} existing {{ 'name matches' if exact_matches == 1 else 'names match' }} linked source evidence exactly.</p>
+    <button class="button" type="submit">Record source for exact matches</button>
+  </form>
+{% endif %}
+
+<section class="source-panel" aria-labelledby="account-names-heading">
+  <header class="panel-header">
+    <h2 id="account-names-heading">{{ pagination.total }} {{ 'account' if pagination.total == 1 else 'accounts' }}</h2>
+  </header>
+  <form class="workflow-filters" method="get" action="{{ url_for('account_names.index') }}">
+    <label>Search<input name="search" type="search" value="{{ search }}" placeholder="Name or domain"></label>
+    <label>Name status<select name="state">
+      {% for key, description in states.items() %}
+        <option value="{{ key }}"{% if selected == key %} selected{% endif %}>{{ description }}</option>
+      {% endfor %}
+    </select></label>
+    <label>Sort<select name="sort">
+      <option value="review"{% if sort == 'review' %} selected{% endif %}>Review priority</option>
+      <option value="name"{% if sort == 'name' %} selected{% endif %}>Account name</option>
+    </select></label>
+    {{ page_size(pagination) }}
+    <button class="button" type="submit">Apply</button>
+  </form>
+  <div class="workflow-list">
+    {% for row in items %}
+      <div class="workflow-row">
+        <div>
+          <strong><a class="text-link" href="{{ url_for('account_detail', account_id=row.id, _anchor='account-name-heading') }}">{{ row.name }}</a></strong>
+          {% if row.domain %}<p>{{ row.domain }}</p>{% endif %}
+          <p>{{ states[row.state] }}</p>
+          {% if row.state == 'different' %}
+            <p>{{ row.preferred.name }} &middot; {{ row.preferred.source_label }}</p>
+          {% elif row.state in ('approved', 'manual') %}
+            <p>{{ row.source_label }}</p>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}
+      <p class="empty-state">No accounts match the current filters.</p>
+    {% endfor %}
+  </div>
+  {{ page_links(pagination) }}
+</section>
+{% endblock %}

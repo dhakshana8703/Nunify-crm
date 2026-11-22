@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}Source key - Nunify CRM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <a class="text-link" href="{{ url_for('source_ops.index') }}">All sources</a>
+  <h1>External source key</h1>
+</header>
+<section class="source-panel workflow-panel-body" aria-label="External ingest setup">
+  <p>Copy this key now. The CRM shows it once.</p>
+  <p><code>{{ new_key }}</code></p>
+  <p>POST JSON to <code>{{ url_for('source_ops.ingest', slug=slug) }}</code> with an <code>Authorization: Bearer &lt;key&gt;</code> header. Use the same idempotency key when retrying the same records.</p>
+  <pre class="original-evidence">{"idempotency_key":"sample-01","records":[{"source_id":"org-01","name":"Example Association","domain":"example.org"}]}</pre>
+</section>
+{% endblock %}

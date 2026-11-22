@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import csrf, page_size, page_links, label with context %}
+{% block title %}Sources - Nunify CRM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <h1>Sources</h1>
+  <p>Stage saved records, schedule collection, and review worker runs.</p>
+</header>
+
+<section class="source-panel workflow-section" aria-labelledby="sources-list-heading">
+  <header class="panel-header"><h2 id="sources-list-heading">Connected sources</h2></header>
+  <div class="workflow-list">
+    {% for source in sources %}
+      <div class="workflow-row">
+        <div>
+          <strong>{{ source.name }}</strong>
+          {% if source.adapter in ('cvent', 'directory') %}
+            <p>Saved source · {% if source.next_run_at %}Next run {{ source.next_run_at[:16]|replace('T', ' ') }} UTC{% else %}Schedule paused{% endif %}</p>
+          {% elif source.adapter == 'external' %}
+            <p>API ID <code>{{ source.slug }}</code> · {{ 'Key active' if source.key_active else 'Key revoked' }}</p>
+          {% else %}
+            <p>CSV and XLSX</p>
+          {% endif %}
+        </div>
+        {% if source.adapter in ('cvent', 'directory') %}
+          <div class="workflow-item-actions">
+            <details>
+              <summary>Schedule</summary>
+              <form class="workflow-form" method="post" action="{{ url_for('source_ops.schedule', slug=source.slug) }}">
+                {{ csrf() }}
+                {% set selected_cadence = (source.cadence or 'interval') if source.next_run_at else 'paused' %}
+                <label>Recurrence <select name="cadence">
+                  {% for value, text in [('paused', 'Paused'), ('daily', 'Daily'), ('weekly', 'Weekly'), ('monthly', 'Monthly')] %}
+                    <option value="{{ value }}"{% if selected_cadence == value %} selected{% endif %}>{{ text }}</option>
+                  {% endfor %}
+                  {% if source.schedule_days %}<option value="interval"{% if selected_cadence == 'interval' %} selected{% endif %}>Every {{ source.schedule_days }} days</option>{% endif %}
+                </select></label>
+                <input type="hidden" name="schedule_days" value="{{ source.schedule_days or 0 }}">
+                <label>Local time <input type="time" name="local_time" value="{{ source.local_time or '09:00' }}"></label>
+                <label>Timezone <input name="timezone" value="{{ source.timezone or current_user.timezone }}"></label>
+                <label>Weekday for weekly runs <select name="weekday">
+                  {% for weekday in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] %}
+                    <option value="{{ loop.index0 }}"{% if source.cadence == 'weekly' and source.schedule_day == loop.index0 %} selected{% endif %}>{{ weekday }}</option>
+                  {% endfor %}
+                </select></label>
+                <label>Day for monthly runs <input type="number" name="month_day" min="1" max="31" value="{{ source.schedule_day if source.cadence == 'monthly' else 1 }}"></label>
+                <button class="button button-small" type="submit">Save schedule</button>
+              </form>
+            </details>
+            {% if source.adapter == 'cvent' %}
+              <form method="post" action="{{ url_for('source_ops.queue', slug=source.slug) }}">
+                {{ csrf() }}
+                <button class="button button-small" type="submit">Stage Cvent export</button>
+              </form>
+            {% endif %}
+          </div>
+        {% elif source.adapter == 'external' and source.key_active %}
+          <div class="workflow-item-actions">
+            <form class="workflow-form" method="post" action="{{ url_for('scraper_ingest.set_promotion', slug=source.slug) }}">
+              {{ csrf() }}
+              <label>Completed runs <select name="promotion">
+                <option value="preview"{% if promotion_modes[source.slug] == 'preview' %} selected{% endif %}>Require review</option>
+                <option value="automatic"{% if promotion_modes[source.slug] == 'automatic' %} selected{% endif %}>Promote eligible rows automatically</option>
+              </select></label>
+              <button class="button button-small" type="submit">Save promotion setting</button>
+            </form>
+            <form method="post" action="{{ url_for('source_ops.revoke_key', slug=source.slug) }}">
+              {{ csrf() }}
+              <button class="button button-small" type="submit">Revoke key</button>
+            </form>
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  <p class="workflow-panel-body">Schedules prepare saved-export previews for approval.</p>
+</section>
+
+{% if health_events %}
+<section class="source-panel workflow-section" aria-labelledby="source-health-heading">
+  <header class="panel-header"><h2 id="source-health-heading">Recent source health</h2></header>
+  <div class="workflow-list">
+    {% for event in health_events %}
+      <div class="workflow-row"><div><strong>{{ event.name }} - {{ label(event.kind) }}</strong><p>{{ event.message }}</p></div>
+        {% if event.run_id %}<a href="{{ url_for('source_ops.run_detail', run_id=event.run_id) }}">View run</a>{% endif %}
+        <time datetime="{{ event.occurred_at }}">{{ event.occurred_at[:16]|replace('T', ' ') }} UTC</time>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+<section class="source-panel workflow-section" aria-labelledby="directory-export-heading">
+  <header class="panel-header"><h2 id="directory-export-heading">Saved association export</h2></header>
+  <form class="workflow-form workflow-panel-body" method="post" action="{{ url_for('source_ops.queue_directory_export') }}">
+    {{ csrf() }}
+    <p>Preview <code>all_associations.json</code> from the configured directory source folder. Promotion filters apply to this preview and future scheduled runs.</p>
+    <details>
+      <summary>Promotion filters</summary>
+      <label>Listing types, separated by commas <input name="types" value="{{ directory_defaults.types|join(', ') }}"></label>
+      <label>Minimum members <input type="number" name="min_members" min="1" max="100000000" value="{{ directory_defaults.min_members }}" required></label>
+      <label>Include category terms <input name="include" value="{{ directory_defaults.include|join(', ') }}"></label>
+      <label>Exclude category terms <input name="exclude" value="{{ directory_defaults.exclude|join(', ') }}"></label>
+    </details>
+    <div><button class="button button-primary" type="submit">Stage association export</button></div>
+  </form>
+</section>
+
+<section class="source-panel workflow-section" aria-labelledby="sources-upload-heading">
+  <header class="panel-header"><h2 id="sources-upload-heading">Upload organizations and contacts</h2></header>
+  <p class="workflow-panel-body">Use CSV or the first sheet of an XLSX file. Include <code>name</code> and <code>domain</code> or <code>website</code>. Add <code>source_id</code> to track a row across uploads. Optional fields include <code>organization_type</code>, <code>source_url</code>, <code>contact_name</code>, <code>contact_title</code>, and <code>contact_email</code>.</p>
+  <form class="workflow-filters" method="post" enctype="multipart/form-data" action="{{ url_for('source_ops.upload') }}">
+    {{ csrf() }}
+    <label>Source file <input type="file" name="source_file" accept=".csv,.xlsx" required></label>
+    <button class="button button-primary" type="submit">Preview upload</button>
+  </form>
+</section>
+
+<section class="source-panel workflow-section" aria-labelledby="sources-api-heading">
+  <header class="panel-header"><h2 id="sources-api-heading">External ingest</h2></header>
+  <p class="workflow-panel-body">Enter an existing external source ID to rotate its key.</p>
+  <form class="workflow-filters" method="post" action="{{ url_for('source_ops.create_key') }}">
+    {{ csrf() }}
+    <label>Source name <input name="name" maxlength="100" required></label>
+    <label>Source ID <input name="slug" placeholder="partner-events" pattern="[a-z][a-z0-9\-]{1,39}" maxlength="40" required></label>
+    <button class="button" type="submit">Generate key</button>
+  </form>
+</section>
+
+<section class="source-panel workflow-section" aria-labelledby="source-run-history-heading">
+  <header class="panel-header"><h2 id="source-run-history-heading">Run history</h2></header>
+  <form class="workflow-filters" method="get" action="{{ url_for('source_ops.index') }}">
+    <label>Search <input type="search" name="search" value="{{ search }}"></label>
+    <label>Source <select name="source"><option value="">All sources</option>{% for source in sources %}<option value="{{ source.slug }}"{% if source_filter == source.slug %} selected{% endif %}>{{ source.name }}</option>{% endfor %}</select></label>
+    <label>Status <select name="state"><option value="">All statuses</option>{% for value in ('ready', 'queued', 'running', 'complete', 'partial', 'failed') %}<option value="{{ value }}"{% if state == value %} selected{% endif %}>{{ label(value) }}</option>{% endfor %}</select></label>
+    <label>Sort <select name="order"><option value="newest"{% if order == 'DESC' %} selected{% endif %}>Newest first</option><option value="oldest"{% if order == 'ASC' %} selected{% endif %}>Oldest first</option></select></label>
+    {{ page_size(pagination) }}
+    <button class="button" type="submit">Apply</button>
+  </form>
+  <div class="workflow-list">
+    {% for run in runs %}
+      <div class="workflow-row">
+        <a href="{{ url_for('source_ops.run_detail', run_id=run.id) }}">{{ run.source_name }} · {{ run.input_name }}</a>
+        <div class="workflow-item-actions"><span class="workflow-badge{% if run.state == 'failed' %} is-blocked{% endif %}">{{ label(run.state) }}</span>
+          <time datetime="{{ run.queued_at }}">{{ run.queued_at[:16]|replace('T', ' ') }} UTC</time>
+        </div>
+      </div>
+    {% else %}
+      <p class="empty-state">No runs match these filters.</p>
+    {% endfor %}
+  </div>
+  {{ page_links(pagination) }}
+</section>
+{% endblock %}

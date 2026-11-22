@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}{{ handoff.account_name }} handoff | Nunify CRM{% endblock %}
+{% block content %}
+  <header class="page-header">
+    <a class="text-link" href="{{ url_for('sales_extensions.handoffs') }}">All handoffs</a>
+    <h1>{{ handoff.account_name }} handoff</h1>
+    <p>{{ outcomes[handoff.outcome] }} · {{ 'Pending delivery' if handoff.status in ('pending', 'delivering') else handoff.status|capitalize }}</p>
+  </header>
+  <section class="source-panel workflow-section" aria-labelledby="handoff-details-heading">
+    <header class="panel-header"><h2 id="handoff-details-heading">Handoff details</h2></header>
+    <div class="event-row">
+      <dl class="evidence-fields">
+        <div><dt>Contact</dt><dd>{{ payload.contact.name }}{% if payload.contact.title %} · {{ payload.contact.title }}{% endif %}</dd></div>
+        {% if payload.contact.email %}<div><dt>Contact email</dt><dd>{{ payload.contact.email }}</dd></div>{% endif %}
+        <div><dt>Requested by</dt><dd>{{ handoff.requester_name }}</dd></div>
+        <div><dt>Receiving AE</dt><dd>{{ handoff.ae_name }}</dd></div>
+        {% if meeting_local %}<div><dt>Meeting</dt><dd>{{ meeting_local }}</dd></div>{% endif %}
+      </dl>
+      <h3>Promised next step</h3>
+      <p>{{ handoff.next_step }}</p>
+      <h3>Conversation context</h3>
+      <p>{{ handoff.context }}</p>
+      {% if outreach_restricted %}<p role="alert">Outreach is restricted for this contact.</p>{% endif %}
+      {% if handoff.status == 'failed' %}
+        <p role="alert">{{ handoff.last_error }}</p>
+        {% if managed_by_user %}
+          <form method="post" action="{{ url_for('sales_extensions.retry_handoff', handoff_id=handoff.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="button button-primary" type="submit">Retry delivery</button>
+          </form>
+        {% endif %}
+      {% endif %}
+      {% if handoff.receipt and managed_by_user %}<p>Delivery receipt {{ handoff.receipt }}</p>{% endif %}
+    </div>
+  </section>
+  <section class="source-panel workflow-section" aria-labelledby="handoff-conversation-heading">
+    <header class="panel-header"><h2 id="handoff-conversation-heading">Recent conversation</h2></header>
+    {% for activity in payload.conversation %}
+      <article class="event-row">
+        <h3>{{ activity.channel|capitalize }} · {{ activity.outcome|replace('_', ' ')|capitalize }}</h3>
+        <p>{{ activity.actor }} · {{ activity.when_local }}</p>
+        {% if activity.note %}<p>{{ activity.note }}</p>{% endif %}
+      </article>
+    {% else %}
+      <p class="empty-state">No earlier conversation entries were recorded.</p>
+    {% endfor %}
+  </section>
+{% endblock %}

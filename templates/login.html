@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import csrf with context %}
+
+{% block title %}Sign in | Nunify CRM{% endblock %}
+
+{% block content %}
+  <section class="sign-in-card source-panel" aria-labelledby="login-heading">
+    <div class="sign-in-brand">
+      <span class="brand-mark" aria-hidden="true">n</span>
+      <span>Nunify CRM</span>
+    </div>
+    <h1 id="login-heading">Sign in</h1>
+    {% if error %}<p class="workflow-notice is-error" role="alert">{{ error }}</p>{% endif %}
+    <form class="workflow-form" action="{{ url_for('workflow.login') }}" method="post">
+      {{ csrf() }}
+      <label>Email
+        <input type="email" name="email" value="{{ request.form.get('email', '') }}" autocomplete="username" required>
+      </label>
+      <label>Password
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button class="button button-primary" type="submit">Sign in</button>
+    </form>
+  </section>
+{% endblock %}

@@ -1,0 +1,237 @@
+{% from 'workflow_ui.html' import contact_channels, csrf, label, task_form with context %}
+
+<section class="source-panel workflow-section" aria-labelledby="why-account-heading">
+  <header class="panel-header">
+    <h2 id="why-account-heading">Why this account matters</h2>
+    <span class="count-tag">{{ label(work.stage, 'Discovered') }}</span>
+  </header>
+  <div class="workflow-panel-body account-context">
+    <div>
+      {% if events %}
+        <p>Saved Cvent events identify {{ account.name }} as an event organizer and show its use of Cvent.</p>
+      {% endif %}
+      {% if listings %}
+        <p>The Directory of Associations lists {{ listings[0].name }}{% if listings[0].members %} with {{ listings[0].members }} members{% endif %}.</p>
+      {% endif %}
+      {% if additional_evidence %}<p>Other sources: {{ additional_evidence|map(attribute='source_name')|unique|join(', ') }}.</p>{% endif %}
+      {% if not events and not listings and not additional_evidence %}<p>Review this account's source records before reaching out.</p>{% endif %}
+      {% if events or listings or additional_evidence %}<p><a class="text-link" href="{{ '#source-evidence' if events or listings else '#additional-evidence-heading' }}">View source evidence</a></p>{% endif %}
+    </div>
+    <dl class="assignment-details">
+      <div><dt>Next event</dt><dd>{% if work.next_event %}<time datetime="{{ work.next_event }}">{{ work.next_event }}</time>{% else %}No upcoming date recorded{% endif %}</dd></div>
+      <div><dt>Outreach</dt><dd>{{ 'Suppressed' if work.blocked else 'No account restriction recorded' }}</dd></div>
+    </dl>
+    {% if work.blocked %}<p class="workflow-notice is-error" role="status">{{ work.blocked }}. Outreach and new follow-ups are blocked.</p>{% endif %}
+    {% if work.active_coverage %}
+      <p class="workflow-notice">{{ work.active_coverage.rep_name }} is covering until <time datetime="{{ work.active_coverage.ends_at }}">{{ work.active_coverage.ends_at|replace('T', ' ')|replace('+00:00', ' UTC') }}</time>. {{ work.owner_name or 'The permanent owner' }} remains the account owner.</p>
+    {% endif %}
+  </div>
+</section>
+
+{% if work.can_work %}
+  <section class="source-panel workflow-section" aria-labelledby="log-activity-heading">
+    <header class="panel-header"><h2 id="log-activity-heading">Log activity</h2></header>
+    <form class="workflow-form workflow-panel-body" data-activity-form action="{{ url_for('workflow.log_activity', account_id=account.id) }}" method="post">
+      {{ csrf() }}
+      <input type="hidden" name="action_key" value="{{ action_key }}">
+      <input type="hidden" name="revision" value="{{ work.revision }}">
+      <div class="workflow-form-grid">
+        <label>Contact
+          <select name="person_id">
+            <option value="">Account activity</option>
+            {% for person in contacts if not person.blocked %}
+              <option value="{{ person.id }}"{% if request.args.get('person_id')|int == person.id %} selected{% endif %}>{{ person.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Channel
+          <select name="channel" data-activity-channel>
+            <option value="call">Call</option>
+            <option value="email">Email</option>
+            <option value="linkedin">LinkedIn</option>
+            {% if not work.blocked %}<option value="meeting">Meeting</option>{% endif %}
+            <option value="note">Note</option>
+          </select>
+        </label>
+        <label>Outcome
+          <select name="outcome" data-activity-outcome>
+            <optgroup label="Call" data-channel="call">
+              {% if not work.blocked %}
+                <option value="no_answer">No answer</option>
+                <option value="voicemail">Voicemail</option>
+                <option value="connected">Connected</option>
+                <option value="wrong_number">Wrong number</option>
+                <option value="not_interested">Not interested</option>
+                <option value="meeting_booked">Meeting booked</option>
+                <option value="ghosted">Conversation went quiet</option>
+              {% endif %}
+              <option value="replied">Inbound call</option>
+              <option value="opted_out">Opted out</option>
+            </optgroup>
+            <optgroup label="Email" data-channel="email">
+              {% if not work.blocked %}
+                <option value="sent">Sent</option>
+                <option value="ghosted">Conversation went quiet</option>
+              {% endif %}
+              <option value="replied">Reply received</option>
+              <option value="demo_requested">Demo requested</option>
+              <option value="pricing_requested">Pricing requested</option>
+              <option value="bounced">Bounced</option>
+              <option value="opted_out">Opted out</option>
+            </optgroup>
+            <optgroup label="LinkedIn" data-channel="linkedin">
+              {% if not work.blocked %}
+                <option value="connection_sent">Connection sent</option>
+                <option value="message_sent">Message sent</option>
+                <option value="ghosted">Conversation went quiet</option>
+              {% endif %}
+              <option value="accepted">Connection accepted</option>
+              <option value="replied">Reply received</option>
+              <option value="demo_requested">Demo requested</option>
+              <option value="pricing_requested">Pricing requested</option>
+              <option value="opted_out">Opted out</option>
+            </optgroup>
+            {% if not work.blocked %}
+              <optgroup label="Meeting" data-channel="meeting">
+                <option value="meeting_booked">Meeting booked</option>
+                <option value="no_show">No show</option>
+              </optgroup>
+            {% endif %}
+            <optgroup label="Note" data-channel="note">
+              <option value="noted">Note recorded</option>
+              <option value="nurture">Move to nurture</option>
+            </optgroup>
+          </select>
+        </label>
+      </div>
+      <label>Notes
+        <textarea name="note" rows="3" maxlength="4000"></textarea>
+      </label>
+      {% if not work.blocked %}
+        <div class="workflow-form-grid followup-fields">
+          <div>
+            <label>Follow-up date
+              <input type="date" name="due_on"{% if local_day is defined %} min="{{ local_day }}"{% endif %}>
+              {% if due_timezone is defined %}<small>{{ due_timezone }}</small>{% endif %}
+            </label>
+            <label class="tomorrow-shortcut"><input type="checkbox" name="due_tomorrow" value="1"> Use tomorrow</label>
+          </div>
+          <label>Next action
+            <input name="next_step" maxlength="180" placeholder="Call again">
+          </label>
+        </div>
+      {% endif %}
+      <div><button type="submit" class="button button-primary">Save activity</button></div>
+    </form>
+    <script defer src="{{ url_for('static', filename='workflow.js') }}"></script>
+  </section>
+{% endif %}
+
+<div class="source-grid workflow-section">
+  <section class="source-panel" aria-labelledby="contacts-heading">
+    <header class="panel-header">
+      <h2 id="contacts-heading">Contacts</h2>
+      {% if has_suppressed_contacts %}
+        {% if show_suppressed %}
+          <a class="text-link" href="{{ url_for('account_detail', account_id=account.id) }}#contacts-heading">Hide suppressed</a>
+        {% else %}
+          <a class="text-link" href="{{ url_for('account_detail', account_id=account.id, show_suppressed=1) }}#contacts-heading">Show suppressed</a>
+        {% endif %}
+      {% endif %}
+    </header>
+    <ul class="workflow-list workflow-compact-list">
+      {% for person in contacts %}
+        <li class="workflow-row">
+          <div>
+            <h3><a class="text-link" href="{{ url_for('workflow.contact_detail', account_id=account.id, person_id=person.id, **({'show_suppressed': 1} if person.blocked else {})) }}">{{ person.name }}</a></h3>
+            {% if person.title %}<p>{{ person.title }}</p>{% endif %}
+            {{ contact_channels(person) }}
+            <p>{{ person.origin_label }}{% if person.origin == 'apollo' and not person.blocked %} · {{ 'Previously unlocked' if person.unlocked else 'Locked candidate' }}{% endif %}</p>
+            {% if cvent_contact_evidence is defined %}
+              {% for provenance in cvent_contact_evidence.get(person.id, []) %}
+                <p>
+                  {% if provenance.source_url and provenance.source_url.startswith(('https://web.cvent.com/', 'https://www.cvent.com/')) %}
+                    <a class="text-link" href="{{ provenance.source_url }}" rel="noopener noreferrer" target="_blank">{{ provenance.event_name or 'Cvent event' }}</a>
+                  {% else %}
+                    {{ provenance.event_name or 'Cvent event' }}
+                  {% endif %}
+                  {% if provenance.observed_at %} · <time datetime="{{ provenance.observed_at }}">{{ provenance.observed_at[:10] }}</time>{% endif %}
+                </p>
+              {% endfor %}
+            {% endif %}
+            {% if person.blocked %}<p>{{ person.blocked }}</p>{% endif %}
+          </div>
+          <span class="workflow-badge{% if person.do_not_contact or person.blocked %} is-blocked{% endif %}">{{ 'Do not contact' if person.do_not_contact or person.blocked else label(person.status, 'Not contacted') }}</span>
+        </li>
+      {% else %}
+        <li class="empty-state">{{ 'No available contacts.' if has_suppressed_contacts else 'No contacts on this account.' }}</li>
+      {% endfor %}
+    </ul>
+    {% if work.can_work and not work.blocked %}
+      <details class="workflow-panel-body workflow-detail-form">
+        <summary>Add contact</summary>
+        <form class="workflow-form" action="{{ url_for('workflow.add_contact', account_id=account.id) }}" method="post">
+          {{ csrf() }}
+          <input type="hidden" name="revision" value="{{ work.revision }}">
+          <div class="workflow-form-grid">
+            <label>Name <input name="name" maxlength="180" required></label>
+            <label>Job title <input name="title" maxlength="180"></label>
+            <label>Email <input type="email" name="email" maxlength="254"></label>
+            <label>Phone <input type="tel" name="phone" maxlength="64"></label>
+            <label>LinkedIn profile <input type="url" name="linkedin_url" maxlength="512"></label>
+            <label>Persona
+              <select name="persona">
+                <option value="">Unspecified</option>
+                <option value="P1">P1 - decision maker</option>
+                <option value="P2">P2 - operational contact</option>
+              </select>
+            </label>
+          </div>
+          <div><button type="submit" class="button button-primary">Add contact</button></div>
+        </form>
+      </details>
+    {% endif %}
+  </section>
+
+  <section class="source-panel" aria-labelledby="account-tasks-heading">
+    <header class="panel-header"><h2 id="account-tasks-heading">Follow-ups</h2></header>
+    {% if work.can_work and not work.blocked %}
+      {{ task_form(account.id, work.revision, task_action_key, local_day, contacts|rejectattr('blocked')|list) }}
+    {% endif %}
+    <ul class="workflow-list workflow-compact-list">
+      {% for task in tasks %}
+        <li class="workflow-row">
+          <div>
+            <h3>{{ task.title }}</h3>
+            {% if task.contact_name %}<p>{{ task.contact_name }}</p>{% endif %}
+            <p>{{ task.owner_name or 'Unassigned' }} · <time datetime="{{ task.due_on }}">{{ task.due_on }}</time></p>
+          </div>
+          <span class="workflow-badge">{{ label(task.status) }}</span>
+        </li>
+      {% else %}
+        <li class="empty-state">No follow-ups on this account.</li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+
+<section class="source-panel workflow-section" aria-labelledby="activity-heading">
+  <header class="panel-header"><h2 id="activity-heading">Activity timeline</h2></header>
+  <ul class="workflow-list">
+    {% for activity in activities %}
+      <li class="workflow-row activity-result">
+        <div>
+          <h3>{{ label(activity.channel) }} · {{ label(activity.outcome) }}</h3>
+          <p>{{ activity.actor_name }}{% if activity.contact_name %} · {{ activity.contact_name }}{% endif %}</p>
+          {% if activity.note %}<p class="activity-note">{{ activity.note }}</p>{% endif %}
+          {% if activity.outcome in ('demo_requested', 'pricing_requested', 'meeting_booked') and sales is defined and sales.contacts and sales.ae_options %}
+            <p><a class="text-link" href="#handoff-heading">Prepare AE handoff</a></p>
+          {% endif %}
+        </div>
+        <time datetime="{{ activity.occurred_at }}">{{ activity.occurred_at|replace('T', ' ')|replace('+00:00', ' UTC') }}</time>
+      </li>
+    {% else %}
+      <li class="empty-state">No activity has been logged.</li>
+    {% endfor %}
+  </ul>
+</section>

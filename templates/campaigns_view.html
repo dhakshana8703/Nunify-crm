@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import page_size with context %}
+
+{% block title %}{{ view.name }} | Nunify CRM{% endblock %}
+{% block content %}
+  <header class="page-header">
+    <a class="text-link" href="{{ url_for('campaigns.index') }}">Sales views and campaigns</a>
+    <h1>{{ view.name }}</h1>
+    <p>{{ view.organization_type or 'Any organization type' }} · {{ 'Cvent' if view.platform == 'cvent' else ('Unknown platform' if view.platform else 'Any platform') }}</p>
+  </header>
+  <section class="source-panel" aria-label="Matching accounts">
+    <form method="get" class="workflow-filters">
+      <label class="grow">Search accounts<input type="search" name="search" value="{{ search }}"></label>
+      <label>Ownership<select name="ownership">
+        <option value="">Any owner status</option>
+        {% for value in ('assigned', 'unassigned') %}<option value="{{ value }}"{% if ownership == value %} selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
+      </select></label>
+      <label>Sort<select name="sort">
+        <option value="name">Name</option>
+        <option value="next_event"{% if sort == 'next_event' %} selected{% endif %}>Next event</option>
+      </select></label>
+      {{ page_size(pagination) }}
+      <button class="button" type="submit">Apply</button>
+    </form>
+    <ul class="workflow-list">
+      {% for item in items %}
+        <li class="workflow-row">
+          <div>
+            <h3><a class="text-link" href="{{ url_for('account_detail', account_id=item.id) }}">{{ item.name }}</a></h3>
+            <p>{{ item.owner_name or 'Unassigned' }}{% if item.next_event %} · Next event {{ item.next_event }}{% endif %}</p>
+          </div>
+        </li>
+      {% else %}
+        <li class="empty-state">No accounts match this view.</li>
+      {% endfor %}
+    </ul>
+    {% if pagination.pages > 1 %}
+      <nav class="pagination" aria-label="Sales view pages">
+        {% set params = dict(view_id=view.id, search=search, ownership=ownership, sort=sort, page_size=pagination.size) %}
+        {% if pagination.page > 1 %}<a href="{{ url_for('campaigns.view_detail', page=pagination.page - 1, **params) }}">Previous</a>{% endif %}
+        <span>Page {{ pagination.page }} of {{ pagination.pages }}</span>
+        {% if pagination.page < pagination.pages %}<a href="{{ url_for('campaigns.view_detail', page=pagination.page + 1, **params) }}">Next</a>{% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}

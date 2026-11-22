@@ -1,0 +1,55 @@
+<section class="source-panel workflow-panel" id="qualification">
+  <header class="panel-header">
+    <h2>Qualification</h2>
+    {% if growth.qualification %}<span class="count-tag">{{ growth.qualification.score }} points</span>{% endif %}
+  </header>
+  <div class="workflow-panel-body">
+    {% if growth.remaining is not none %}<p>{{ growth.remaining }} demo credits available today.</p>{% endif %}
+    {% if growth.qualification %}
+      <p>Reviewed <time datetime="{{ growth.qualification.observed_at }}">{{ growth.qualification.observed_at[:10] }}</time></p>
+      <ul class="workflow-list">
+        {% for signal in growth.qualification.signals %}
+          <li>{% if signal.url and signal.url.startswith(('https://', 'http://')) %}<a class="text-link" href="{{ signal.url }}" rel="noopener noreferrer">{{ signal.label }}</a>{% else %}{{ signal.label }}{% endif %} (+{{ signal.points }})</li>
+        {% else %}
+          <li>No fit signals recorded.</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>Qualification pending.</p>
+    {% endif %}
+    {% if growth.can_approve %}
+      <details class="event-details">
+        <summary>Review fit and saved website evidence</summary>
+        <form class="workflow-form" method="post" enctype="multipart/form-data" action="{{ url_for('growth_ops.qualify_account', account_id=account.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Evidence URL <input type="url" name="evidence_url"></label>
+          <label>Saved HTML (optional) <input type="file" name="evidence" accept=".html,.htm,text/html"></label>
+          <button type="submit">Score account</button>
+        </form>
+      </details>
+    {% endif %}
+    {% if growth.can_enrich and work.can_work and not work.blocked %}
+      {% if growth.can_approve or growth.qualification.score >= growth.auto_at %}
+        <form class="workflow-form" method="post" action="{{ url_for('growth_ops.enrich', account_id=account.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit">Queue contact search</button>
+        </form>
+      {% else %}<p>Contact search requires manager approval.</p>{% endif %}
+      {% for contact in contacts if contact.origin == 'apollo_offline' and not contact.unlocked and not contact.blocked %}
+        <form class="workflow-form" method="post" action="{{ url_for('growth_ops.enrich', account_id=account.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="person_id" value="{{ contact.id }}">
+          <button type="submit">Unlock {{ contact.name }}</button>
+        </form>
+      {% endfor %}
+    {% endif %}
+    {% if growth.jobs %}
+      <ul class="workflow-list">
+        {% for job in growth.jobs %}
+          <li>{{ job.action|replace('_', ' ')|capitalize }} - {{ job.state|capitalize }}{% if job.error %}. {{ job.error }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    <p class="workflow-item-meta">Apollo connection pending. The local worker uses synthetic responses.</p>
+  </div>
+</section>

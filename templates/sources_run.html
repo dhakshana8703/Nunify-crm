@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import csrf, page_size, label with context %}
+{% block title %}Source run - Nunify CRM{% endblock %}
+{% macro row_label(result) -%}
+  {%- if full_import and result == 'imported' and full_import.phase == 'preview' -%}Eligible to promote
+  {%- elif full_import and result == 'staged' and run.state in ('ready', 'complete', 'partial') -%}Held in staging
+  {%- else -%}{{ label(result)|trim }}
+  {%- endif -%}
+{%- endmacro %}
+{% block content %}
+<header class="page-header">
+  <a class="text-link" href="{{ url_for('source_ops.index') }}">All sources</a>
+  <h1>{{ run.source_name }}{% if run.state == 'ready' %} preview{% endif %}</h1>
+  <p>{{ run.input_name }} · {{ label(run.state) }} · {{ run.attempts }} worker attempts</p>
+  {% if run.adapter in ('cvent', 'directory') and run.state in ('ready', 'complete', 'partial') and (counts.review or counts.invalid) %}
+    <p><a class="text-link" href="{{ url_for('source_review.index', run_id=run.id) }}">Review unresolved records</a></p>
+  {% endif %}
+</header>
+<section class="source-panel" aria-labelledby="source-run-heading">
+  <header class="panel-header"><h2 id="source-run-heading">Run #{{ run.id }}</h2></header>
+  {% if run.error or run.state in ('ready', 'failed', 'queued', 'running') %}
+    <div class="workflow-panel-body">
+      {% if run.error %}<p class="workflow-notice is-error" role="alert">{{ run.error }}</p>{% endif %}
+      {% if run.state in ('ready', 'failed') %}
+        <form method="post" action="{{ url_for('source_ops.queue_run', run_id=run.id) }}">
+          {{ csrf() }}
+          <button class="button button-primary" type="submit">{{ 'Retry run' if run.state == 'failed' else ('Promote eligible ' ~ ('listings' if run.adapter == 'directory' else 'events') if full_import else 'Queue import') }}</button>
+        </form>
+      {% else %}
+        <p data-source-run-status="{{ url_for('source_ops.run_status', run_id=run.id) }}"
+           data-state="{{ run.state }}" data-attempts="{{ run.attempts }}">
+          <span role="status">
+            {% if run.retry_after %}
+              Retry scheduled for <time datetime="{{ run.retry_after }}">{{ run.retry_after[:16]|replace('T', ' ') }} UTC</time>.
+            {% else %}
+              Waiting for the worker to {{ 'finish this run' if run.state == 'running' else 'start this run' }}.
+            {% endif %}
+          </span>
+          <a href="{{ request.full_path.rstrip('?') }}">Refresh status</a>
+        </p>
+        <script defer src="{{ url_for('static', filename='workflow.js') }}"></script>
+      {% endif %}
+    </div>
+  {% endif %}
+  {% if full_import and run.adapter == 'directory' %}
+    <div class="workflow-panel-body">
+      <p>Listing types {{ directory_policy.types|join(', ') }}. Minimum membership {{ directory_policy.min_members }}.</p>
+      <p>Include {{ directory_policy.include|join(', ') or 'any category' }}. Exclude {{ directory_policy.exclude|join(', ') or 'none' }}.</p>
+    </div>
+  {% endif %}
+  {% if counts %}
+    <p class="workflow-panel-body">{{ counts.values()|sum }} {{ 'listings' if run.adapter == 'directory' else 'records' }} · {% for result, number in counts|dictsort %}{{ number }} {{ row_label(result)|lower }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+    <form class="workflow-filters" method="get" action="{{ url_for('source_ops.run_detail', run_id=run.id) }}" data-source-run-filters>
+      <label>Search records <input type="search" name="search" value="{{ search }}"></label>
+      <label>Result <select name="result">
+        <option value="">All results</option>
+        {% for result in counts|sort %}<option value="{{ result }}"{% if result == result_filter %} selected{% endif %}>{{ row_label(result) }}</option>{% endfor %}
+      </select></label>
+      <label>Sort <select name="order"><option value="asc">First row first</option><option value="desc"{% if order == 'DESC' %} selected{% endif %}>Last row first</option></select></label>
+      {{ page_size(pagination) }}
+      <button class="button" type="submit">Apply</button>
+    </form>
+    <div class="workflow-list" data-source-run-records>
+      {% for row in rows %}
+        <div class="workflow-row">
+          <div><strong>Row {{ row.row_number }}{% if row.record.name or row.record.event_name %} · {{ row.record.name or row.record.event_name }}{% endif %}</strong>
+            <p>{{ row_label(row.result) }}{% if row.detail %} · {{ row.detail }}{% endif %}</p>
+            {% if run.adapter in ('cvent', 'directory') and run.state in ('ready', 'complete', 'partial') and row.result in ('review', 'invalid') %}
+              <a class="text-link" href="{{ url_for('source_review.detail', run_id=run.id, row_number=row.row_number) }}">Review record</a>
+            {% endif %}
+            <details>
+              <summary>Original values</summary>
+              <dl class="evidence-list">
+                {% for key, value in row.record|dictsort %}<dt>{{ key }}</dt><dd>{{ value if value is not none else 'Blank' }}</dd>{% endfor %}
+              </dl>
+            </details>
+          </div>
+        </div>
+      {% endfor %}
+      {% if not rows %}<p class="empty-state">No records match the filters.</p>{% endif %}
+    </div>
+    {% if pagination.pages > 1 %}
+      <nav class="pagination" aria-label="Source row pages">
+        {% if pagination.page > 1 %}<a rel="prev" href="{{ url_for('source_ops.run_detail', run_id=run.id, page_size=pagination.size, page=pagination.page-1, search=search, result=result_filter, order=order|lower) }}">Previous</a>{% endif %}
+        <span>Page {{ pagination.page }} of {{ pagination.pages }}</span>
+        {% if pagination.page < pagination.pages %}<a rel="next" href="{{ url_for('source_ops.run_detail', run_id=run.id, page_size=pagination.size, page=pagination.page+1, search=search, result=result_filter, order=order|lower) }}">Next</a>{% endif %}
+      </nav>
+    {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

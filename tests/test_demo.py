@@ -1,4 +1,5 @@
 import json
+import re
 import unittest
 from contextlib import closing
 from pathlib import Path
@@ -8,6 +9,7 @@ from app import create_app
 from crm_store import connect, import_snapshot
 from directory_source import load_directory_records
 from import_demo import ACCOUNTS, AARP_EVENTS, CVENT_EXPORT, SOURCE_PARENT, import_demo, load_cvent_records
+from workflow_store import DEMO_PASSWORD
 
 
 CVENT_DIR = SOURCE_PARENT / "cvent-scrapper"
@@ -119,9 +121,16 @@ class TwoSourceDemoTest(unittest.TestCase):
     def test_ui_and_legacy_read_routes_use_the_shared_account(self):
         snapshot = import_demo(self.database, CVENT_DIR, DIRECTORY_DIR)
         aarp, ctaa = snapshot["accounts"]
-        client = create_app(self.database).test_client()
+        client = create_app(self.database, demo=True).test_client()
+        login = client.get("/login")
+        csrf = re.search(rb'name="csrf_token" value="([^"]+)"', login.data)[1].decode()
+        signed_in = client.post("/login", data={
+            "csrf_token": csrf, "email": "manager@example.test", "password": DEMO_PASSWORD,
+        })
+        self.assertEqual(signed_in.status_code, 303)
 
-        shared = client.get("/")
+        self.assertEqual(client.get("/").location, "/assignment")
+        shared = client.get(f"/accounts/{aarp['id']}")
         self.assertEqual(shared.status_code, 200)
         self.assertIn(b"AARP WY 2026 Volunteer Summit", shared.data)
         self.assertIn(b"American Association of Retired Persons", shared.data)

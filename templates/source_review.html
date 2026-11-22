@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import label, page_size, page_links with context %}
+{% block title %}Source review - Nunify CRM{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1>Source review</h1>
+  {% if run_id is not none %}<p>Run #{{ run_id }} · <a class="text-link" href="{{ url_for('source_review.index') }}">All runs</a></p>{% endif %}
+</header>
+
+<section class="source-panel" aria-labelledby="source-review-heading">
+  <header class="panel-header"><h2 id="source-review-heading">{{ pagination.total }} {{ 'record' if pagination.total == 1 else 'records' }}</h2></header>
+  <form class="workflow-filters" method="get" action="{{ url_for('source_review.index') }}">
+    {% if run_id is not none %}<input type="hidden" name="run_id" value="{{ run_id }}">{% endif %}
+    <label>Search<input name="search" type="search" value="{{ search }}" placeholder="Organization, event or reason"></label>
+    <label>Source<select name="source">
+      <option value="">All sources</option>
+      {% for key, name in sources.items() %}<option value="{{ key }}"{% if selected == key %} selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select></label>
+    <label>Decision<select name="state">
+      {% for key, name in [('open', 'Pending or held'), ('all', 'All decisions'), ('held', 'Held'), ('linked', 'Linked'), ('excluded', 'Excluded')] %}
+        <option value="{{ key }}"{% if scope == key %} selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select></label>
+    <label>Result<select name="result">
+      {% for key, name in [('', 'All results'), ('review', 'Needs review'), ('invalid', 'Invalid')] %}
+        <option value="{{ key }}"{% if result == key %} selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select></label>
+    <label>Sort<select name="sort">
+      {% for key, name in [('newest', 'Newest run'), ('oldest', 'Oldest run'), ('name', 'Name')] %}
+        <option value="{{ key }}"{% if sort == key %} selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select></label>
+    {{ page_size(pagination) }}
+    <button class="button" type="submit">Apply</button>
+  </form>
+  <div class="workflow-list">
+    {% for row in items %}
+      <div class="workflow-row">
+        <div>
+          <strong><a class="text-link" href="{{ url_for('source_review.detail', run_id=row.run_id, row_number=row.row_number) }}">{{ row.title or 'Untitled record' }}</a></strong>
+          <p>{{ sources[row.source_slug] }} · Run #{{ row.run_id }}, row {{ row.row_number }} · {{ label(row.decision, 'Pending') }}</p>
+          <small>{{ row.detail or 'Further evidence is needed.' }}{% if row.decision and row.reason %} {{ row.reason }}{% endif %}</small>
+        </div>
+      </div>
+    {% else %}
+      <p class="empty-state">No records match the current filters.</p>
+    {% endfor %}
+  </div>
+  {{ page_links(pagination) }}
+</section>
+{% endblock %}

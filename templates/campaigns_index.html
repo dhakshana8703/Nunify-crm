@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import csrf, page_size, page_links with context %}
+
+{% block title %}Campaigns | Nunify CRM{% endblock %}
+{% block content %}
+  <header class="page-header">
+    <h1>Campaigns</h1>
+    <p>Membership is saved locally. Live sequencer connection pending.</p>
+  </header>
+  {% if current_user.role in ('admin', 'manager') %}
+    <div class="source-grid workflow-section">
+      <section class="source-panel" aria-labelledby="saved-views-heading">
+        <header class="panel-header"><h2 id="saved-views-heading">Saved sales views</h2></header>
+        {% if views %}
+          <ul class="workflow-list workflow-compact-list">
+            {% for view in views %}
+              <li class="workflow-row"><a class="text-link" href="{{ url_for('campaigns.view_detail', view_id=view.id) }}">{{ view.name }}</a></li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        <details class="workflow-panel-body workflow-detail-form">
+          <summary>Save an account view</summary>
+          <form method="post" action="{{ url_for('campaigns.create_view') }}" class="workflow-form">
+            {{ csrf() }}
+            <label>View name<input name="name" maxlength="120" required></label>
+            <div class="workflow-form-grid">
+              <label>Organization type<input name="organization_type" maxlength="80" placeholder="Any type"></label>
+              <label>Platform
+                <select name="platform">
+                  <option value="">Any platform</option>
+                  <option value="cvent">Cvent</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+              </label>
+            </div>
+            <div><button class="button button-primary" type="submit">Save view</button></div>
+          </form>
+        </details>
+      </section>
+      <section class="source-panel" aria-labelledby="create-campaign-heading">
+        <header class="panel-header"><h2 id="create-campaign-heading">Create a campaign</h2></header>
+        <form method="post" action="{{ url_for('campaigns.create_campaign') }}" class="workflow-form workflow-panel-body">
+          {{ csrf() }}
+          <label>Campaign name<input name="name" maxlength="120" required></label>
+          <label>Account view
+            <select name="view_id">
+              <option value="">Any eligible account</option>
+              {% for view in views %}<option value="{{ view.id }}">{{ view.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <div><button class="button button-primary" type="submit">Create campaign</button></div>
+        </form>
+      </section>
+    </div>
+  {% endif %}
+  <section class="source-panel" aria-label="Campaign list">
+    <form method="get" class="workflow-filters">
+      <label class="grow">Search campaigns<input type="search" name="search" value="{{ search }}"></label>
+      <label>Account view<select name="view_id">
+        <option value="">All account views</option>
+        {% for view in views %}<option value="{{ view.id }}"{% if request.args.get('view_id', type=int) == view.id %} selected{% endif %}>{{ view.name }}</option>{% endfor %}
+      </select></label>
+      <label>Sort<select name="sort">
+        <option value="recent">Newest first</option>
+        <option value="name"{% if sort == 'name' %} selected{% endif %}>Name</option>
+      </select></label>
+      {{ page_size(pagination) }}
+      <button class="button" type="submit">Apply</button>
+    </form>
+    <ul class="workflow-list">
+      {% for item in items %}
+        <li class="workflow-row">
+          <div>
+            <h3><a class="text-link" href="{{ url_for('campaigns.detail', campaign_id=item.id) }}">{{ item.name }}</a></h3>
+            <p>{{ item.view_name or 'Any eligible account' }}</p>
+          </div>
+        </li>
+      {% else %}
+        <li class="empty-state">No campaigns match your filters.</li>
+      {% endfor %}
+    </ul>
+    {{ page_links(pagination) }}
+  </section>
+{% endblock %}

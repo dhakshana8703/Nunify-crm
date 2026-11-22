@@ -1,0 +1,84 @@
+{% macro csrf() -%}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{%- endmacro %}
+
+{% macro page_size(pagination) -%}
+  <label>Per page
+    <select name="page_size">
+      {% for size in (25, 50, 100) %}
+        <option value="{{ size }}"{% if size == pagination.size %} selected{% endif %}>{{ size }}</option>
+      {% endfor %}
+    </select>
+  </label>
+{%- endmacro %}
+
+{% macro page_links(pagination) -%}
+  {% if pagination.pages > 1 %}
+    {% set params = request.args.to_dict() %}
+    <nav class="pagination" aria-label="Results pagination">
+      {% if pagination.page > 1 %}
+        {% set _ = params.update({'page': pagination.page - 1}) %}
+        <a class="text-link" rel="prev" href="{{ url_for(request.endpoint, **params) }}">Previous</a>
+      {% endif %}
+      <span>Page {{ pagination.page }} of {{ pagination.pages }}</span>
+      {% if pagination.page < pagination.pages %}
+        {% set _ = params.update({'page': pagination.page + 1}) %}
+        <a class="text-link" rel="next" href="{{ url_for(request.endpoint, **params) }}">Next</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+{%- endmacro %}
+
+{% macro source_tags(sources) -%}
+  {% if sources %}
+    <ul class="account-source-tags" aria-label="Account sources">
+      {% for source in sources %}<li class="source-label">{{ source.name }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+{%- endmacro %}
+
+{% macro contact_channels(person) -%}
+  {% if not person.blocked and (person.origin != 'apollo' or person.unlocked) %}
+    {% if person.email or person.origin == 'apollo' %}
+      <p>
+        {% if person.email %}{{ person.email }} · {{ 'Email verified' if person.email_verified else 'Email unverified' }}
+        {% else %}No saved email{% endif %}
+        {% if person.origin == 'apollo' and person.linkedin_url and person.linkedin_url.startswith('https://www.linkedin.com/in/') %}
+          · <a class="text-link" href="{{ person.linkedin_url }}" rel="noopener noreferrer">LinkedIn</a>
+        {% endif %}
+      </p>
+    {% endif %}
+  {% endif %}
+{%- endmacro %}
+
+{% macro label(value, fallback='Unknown') -%}
+  {{ value|replace('_', ' ')|capitalize if value else fallback }}
+{%- endmacro %}
+
+{% macro task_form(account_id, revision, action_key, local_day, contacts=(), person=None) %}
+  <details class="workflow-panel-body workflow-detail-form">
+    <summary>Add follow-up</summary>
+    <form action="{{ url_for('workflow.create_task', account_id=account_id) }}" method="post" class="workflow-form">
+      {{ csrf() }}
+      <input type="hidden" name="revision" value="{{ revision }}">
+      <input type="hidden" name="action_key" value="{{ action_key }}">
+      {% if person %}
+        <input type="hidden" name="person_id" value="{{ person.id }}">
+        <input type="hidden" name="return_to" value="contact">
+      {% endif %}
+      <div class="workflow-form-grid">
+        <label>Next action <input name="title" maxlength="180" required></label>
+        <label>Due date <input type="date" name="due_on" min="{{ local_day }}" required></label>
+        {% if not person and contacts %}
+          <label>Contact
+            <select name="person_id">
+              <option value="">Account follow-up</option>
+              {% for contact in contacts %}<option value="{{ contact.id }}">{{ contact.name }}</option>{% endfor %}
+            </select>
+          </label>
+        {% endif %}
+      </div>
+      <div><button type="submit" class="button button-primary">Add follow-up</button></div>
+    </form>
+  </details>
+{% endmacro %}

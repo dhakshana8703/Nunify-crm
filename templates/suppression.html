@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import page_links with context %}
+{% block title %}Suppression | Nunify CRM{% endblock %}
+{% block content %}
+  <header class="page-header"><h1>Suppression</h1></header>
+  <section class="source-panel workflow-panel">
+    <header class="panel-header"><h2>Add rules</h2></header>
+    <form class="workflow-form workflow-panel-body" method="post" enctype="multipart/form-data" action="{{ url_for('growth_ops.add_rule') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Kind <select name="kind"><option>domain</option><option>email</option><option>account</option></select></label>
+      <label>Domain, address or account ID <input name="value"></label>
+      <label>Reason <input name="reason"></label>
+      <label>Or CSV with kind, value, reason <input type="file" name="rules" accept=".csv,text/csv"></label>
+      <button type="submit">Add rules</button>
+    </form>
+  </section>
+  <section class="source-panel workflow-panel">
+    <header class="panel-header"><h2>Active rules</h2></header>
+    <form class="workflow-filters" method="get">
+      <label>Search <input name="search" value="{{ search }}"></label>
+      <label>Kind <select name="filter">{% for kind in ['all','domain','email','account'] %}<option{% if kind == selected %} selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label>
+      <label>Sort by <select name="sort"><option value="newest">Newest</option><option value="value"{% if sort == 'value' %} selected{% endif %}>Value</option></select></label>
+      <label>Rows <select name="page_size">{% for size in [25, 50, 100] %}<option{% if pagination.size == size %} selected{% endif %}>{{ size }}</option>{% endfor %}</select></label>
+      <button type="submit">Apply</button>
+    </form>
+    <ul class="workflow-list workflow-panel-body">
+      {% for item in items %}
+        <li><strong>{{ item.value }}</strong> · {{ item.kind }} · {{ item.reason }}
+          <form class="workflow-form" method="post" action="{{ url_for('growth_ops.remove_rule', rule_id=item.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Remove rule</button>
+          </form>
+        </li>
+      {% else %}<li>No rules match.</li>{% endfor %}
+    </ul>
+    {{ page_links(pagination) }}
+  </section>
+{% endblock %}

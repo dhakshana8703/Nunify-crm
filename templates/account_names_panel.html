@@ -1,0 +1,52 @@
+{% from 'workflow_ui.html' import csrf with context %}
+{% if account_naming %}
+<section class="source-panel workflow-section" aria-labelledby="account-name-heading">
+  <header class="panel-header"><h2 id="account-name-heading">Account name</h2></header>
+  <div class="workflow-panel-body">
+    <p>{{ account_naming.source_label }} &middot; <strong>{{ account_naming.name }}</strong></p>
+    {% if account_naming.reference %}
+      <p><small>Approved source record {{ account_naming.reference }}</small></p>
+    {% endif %}
+    {% if account_naming.state == 'conflicting' %}
+      <p>The linked records give different organization names. Compare the evidence before choosing.</p>
+    {% endif %}
+    {% if account_naming.candidates %}
+      <details{% if account_naming.state in ('different', 'conflicting') %} open{% endif %}>
+        <summary>Linked name evidence</summary>
+        <div class="workflow-list">
+          {% for candidate in account_naming.candidates %}
+            <div class="workflow-row">
+              <div>
+                <strong>{{ candidate.name }}</strong>
+                <p>{{ candidate.source_label }}
+                  {% if candidate.url %}&middot; <a class="text-link" href="{{ candidate.url }}" target="_blank" rel="noopener noreferrer">Source record</a>{% endif %}
+                </p>
+              </div>
+              {% if current_user.role == 'admin' and account_naming.source != 'manual' %}
+                <form method="post" action="{{ url_for('account_names.save', account_id=account_naming.id) }}">
+                  {{ csrf() }}
+                  <input type="hidden" name="version" value="{{ account_naming.version }}">
+                  <input type="hidden" name="candidate" value="{{ candidate.key }}">
+                  <button class="button" type="submit" name="decision" value="approve">Use this name</button>
+                </form>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </details>
+    {% endif %}
+    {% if current_user.role == 'admin' %}
+      <details>
+        <summary>Edit account name</summary>
+        <form class="workflow-filters" method="post" action="{{ url_for('account_names.save', account_id=account_naming.id) }}">
+          {{ csrf() }}
+          <input type="hidden" name="version" value="{{ account_naming.version }}">
+          <label>Organization name<input name="name" value="{{ account_naming.name }}" required maxlength="200"></label>
+          <label>Reason<input name="reason" required maxlength="500"></label>
+          <button class="button button-primary" type="submit" name="decision" value="manual">Save name</button>
+        </form>
+      </details>
+    {% endif %}
+  </div>
+</section>
+{% endif %}

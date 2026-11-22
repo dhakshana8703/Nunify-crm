@@ -61,7 +61,7 @@ WHERE r.source = 'cvent';
 def connect(database_path, *, read_only=False):
     path = Path(database_path).resolve()
     database = f"{path.as_uri()}?mode=ro" if read_only else path
-    connection = sqlite3.connect(database, uri=read_only)
+    connection = sqlite3.connect(database, uri=read_only, timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
@@ -70,6 +70,7 @@ def connect(database_path, *, read_only=False):
 def initialize(database_path):
     Path(database_path).parent.mkdir(parents=True, exist_ok=True)
     with closing(connect(database_path)) as connection:
+        connection.execute("PRAGMA journal_mode = WAL").fetchone()
         connection.executescript(SCHEMA)
 
 

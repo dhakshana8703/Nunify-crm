@@ -1,17 +1,17 @@
-"""Build the two-source workspace from the sibling projects' saved exports."""
+"""Build the curated two-source fixture in a disposable database."""
 
 import argparse
 import json
 from pathlib import Path
 
 from crm_store import DEFAULT_DB, import_snapshot
+from cvent_import import CVENT_FIELDS, FILE_NAME as CVENT_EXPORT
 from cvent_reads import parse_date_to_iso
 from directory_source import load_directory_records
 
 
 WORKSPACE = Path(__file__).resolve().parent
 SOURCE_PARENT = WORKSPACE.parent
-CVENT_EXPORT = "master_cvent_events.json"
 ACCOUNTS = {
     "aarp": {"name": "AARP", "domain": "aarp.org", "organization_type": "Association"},
     "ctaa": {
@@ -25,12 +25,6 @@ AARP_EVENTS = (
     "2446b2ea-3abb-411b-8611-b4132776e274",
     "5f397d9e-6126-452d-8e68-0c2c93c13c6f",
     "31ad5a83-8073-45f8-a114-2ef4e18dcc96",
-)
-CVENT_FIELDS = (
-    "event_uuid", "cvent_url", "event_name", "event_type", "start_date", "end_date",
-    "attendance_type", "venue_name", "city", "state_region", "state", "country",
-    "organizer", "organizer_company", "client_domain", "resolved_url", "event_url",
-    "created_at", "updated_at",
 )
 
 
