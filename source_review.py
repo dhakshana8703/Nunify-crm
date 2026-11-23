@@ -33,19 +33,19 @@ CREATE INDEX IF NOT EXISTS source_review_queue_rows ON source_run_rows(result, r
 """
 REVIEW_ROWS = """
 WITH staged AS (
-    SELECT row.run_id, row.row_number, row.payload_json, row.result, row.detail, run.source_slug,
-           COALESCE(json_extract(row.payload_json, '$.source_id'), '') AS source_id,
-           COALESCE(json_extract(row.payload_json, '$.details.event_name'),
-                    json_extract(row.payload_json, '$.details.name'), '') AS title,
-           COALESCE(json_extract(row.payload_json, '$.details.organizer_company'), '') AS organizer,
-           CASE WHEN row.result = 'review' AND COALESCE(json_extract(row.payload_json, '$.source_id'), '') <> ''
-                     AND COALESCE(json_extract(row.payload_json, '$.duplicate'), 0) = 0
-                     AND COALESCE(json_extract(row.payload_json, '$.duplicate_id'), 0) = 0
-                THEN run.source_slug || ':' || json_extract(row.payload_json, '$.source_id')
-                ELSE 'row:' || row.run_id || ':' || row.row_number END AS decision_key
-    FROM source_run_rows row JOIN source_runs run ON run.id = row.run_id
+    SELECT sr.run_id, sr.row_number, sr.payload_json, sr.result, sr.detail, run.source_slug,
+           COALESCE(json_extract(sr.payload_json, '$.source_id'), '') AS source_id,
+           COALESCE(json_extract(sr.payload_json, '$.details.event_name'),
+                    json_extract(sr.payload_json, '$.details.name'), '') AS title,
+           COALESCE(json_extract(sr.payload_json, '$.details.organizer_company'), '') AS organizer,
+           CASE WHEN sr.result = 'review' AND COALESCE(json_extract(sr.payload_json, '$.source_id'), '') <> ''
+                     AND COALESCE(CAST(json_extract(sr.payload_json, '$.duplicate') AS TEXT), '0') IN ('0', 'false')
+                     AND COALESCE(CAST(json_extract(sr.payload_json, '$.duplicate_id') AS TEXT), '0') IN ('0', 'false')
+                THEN run.source_slug || ':' || json_extract(sr.payload_json, '$.source_id')
+                ELSE 'row:' || sr.run_id || ':' || sr.row_number END AS decision_key
+    FROM source_run_rows sr JOIN source_runs run ON run.id = sr.run_id
     WHERE run.source_slug IN ('cvent', 'directory') AND run.state IN ('ready', 'complete', 'partial')
-      AND row.result IN ('review', 'invalid')
+      AND sr.result IN ('review', 'invalid')
 ), reviewed AS (
     SELECT staged.*,
            CASE WHEN d.state = 'linked' AND staged.payload_json <> original.payload_json THEN NULL

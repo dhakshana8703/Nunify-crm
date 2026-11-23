@@ -191,7 +191,7 @@ def detail(campaign_id):
                COUNT(CASE WHEN event.event_type IN ('bounced', 'unsubscribed') THEN 1 END) AS blocked
         FROM campaign_members m JOIN people p ON p.id = m.person_id JOIN accounts a ON a.id = p.account_id
         LEFT JOIN sequence_events event ON event.member_id = m.id
-        WHERE m.campaign_id = ? GROUP BY m.id
+        WHERE m.campaign_id = ? GROUP BY m.id, p.name, a.id, a.name
     """, (campaign_id,)) if row["account_id"] in scope]
     status = request.args.get("status", "")
     summaries = {key: sum(row[key] for row in members) for key in ("sent", "replies", "blocked")}

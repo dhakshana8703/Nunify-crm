@@ -19,10 +19,16 @@ class AdminSDRFlowTest(unittest.TestCase):
         self.scratch = instance / f"admin-sdr-flow-{uuid4().hex}"
         self.scratch.mkdir(parents=True)
         self.addCleanup(self.remove_test_files)
-        self.database = self.scratch / "test.sqlite3"
+        self.database = self.database_target()
         self.app = create_app(self.database, demo=True)
         self.clock = datetime(2027, 1, 1, 20, tzinfo=timezone.utc)
         self.app.config.update(TESTING=True, CRM_CLOCK=lambda: self.clock)
+
+    def database_target(self):
+        return self.scratch / "test.sqlite3"
+
+    def check_integrity(self, db):
+        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def remove_test_files(self):
         for file in self.scratch.iterdir():
@@ -142,4 +148,4 @@ class AdminSDRFlowTest(unittest.TestCase):
             self.assertEqual([tuple(row) for row in task], [(account_id, riya_id, "2027-01-04")])
             self.assertEqual(db.execute("SELECT COUNT(*) FROM credit_jobs").fetchone()[0], 0)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM credit_ledger").fetchone()[0], 0)
-            self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+            self.check_integrity(db)

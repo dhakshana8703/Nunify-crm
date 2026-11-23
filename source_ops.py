@@ -24,7 +24,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 import cvent_import
 import directory_import
-from crm_store import DEFAULT_DB, connect, initialize as initialize_crm
+from crm_store import configured_database, connect, initialize as initialize_crm
 from source_schedule import calendar_schedule, next_calendar_run
 from workflow_store import audit, is_blocked, matches_domain, timestamp, transaction, utcnow
 
@@ -124,11 +124,12 @@ INSERT OR IGNORE INTO ingest_sources (slug, name, adapter) VALUES
 def initialize(connection):
     from source_review import initialize as initialize_review
 
-    with transaction(connection):
-        if connection.execute("""
-            SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'directory_import_runs'
-        """).fetchone():
-            connection.execute("ALTER TABLE directory_import_runs RENAME TO saved_export_runs")
+    if getattr(connection, "dialect", "sqlite") == "sqlite":
+        with transaction(connection):
+            if connection.execute("""
+                SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'directory_import_runs'
+            """).fetchone():
+                connection.execute("ALTER TABLE directory_import_runs RENAME TO saved_export_runs")
     connection.executescript(SCHEMA)
     with transaction(connection):
         columns = {row[1] for row in connection.execute("PRAGMA table_info(source_runs)")}
@@ -907,15 +908,16 @@ def ingest(slug):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    parser.add_argument("--db", help="SQLite file or PostgreSQL URL. Defaults to DATABASE_URL when set.")
     parser.add_argument("--cvent-dir", type=Path, default=SOURCE_PARENT / "cvent-scrapper")
     parser.add_argument("--directory-dir", type=Path, default=SOURCE_PARENT / "association")
     parser.add_argument("--once", action="store_true", help="Process queued and due runs, then exit.")
     args = parser.parse_args()
     from workflow_store import initialize as initialize_workflow
 
-    initialize_crm(args.db)
-    with closing(connect(args.db)) as connection:
+    database = args.db or configured_database()
+    initialize_crm(database)
+    with closing(connect(database)) as connection:
         initialize_workflow(connection)
         initialize(connection)
         while True:

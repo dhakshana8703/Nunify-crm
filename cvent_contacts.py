@@ -14,7 +14,7 @@ from uuid import UUID
 
 from werkzeug.security import check_password_hash
 
-from crm_store import connect
+from crm_store import connect, table_exists
 from cvent_import import FILE_NAME as CVENT_EXPORT, _host
 from workflow_store import audit, matches_domain, timestamp, transaction
 
@@ -60,7 +60,7 @@ def initialize(connection):
 
 def evidence_for_account(connection, account_id):
     """Return provenance for use after an account or contact access check."""
-    if not _has_evidence_table(connection):
+    if not table_exists(connection, "cvent_contact_evidence"):
         return []
     return [
         dict(row)
@@ -74,12 +74,6 @@ def evidence_for_account(connection, account_id):
             ORDER BY e.observed_at DESC, s.id
         """, (account_id,))
     ]
-
-
-def _has_evidence_table(connection):
-    return connection.execute("""
-        SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cvent_contact_evidence'
-    """).fetchone() is not None
 
 
 def _event_id(value):
@@ -220,13 +214,13 @@ def import_contacts(connection, source_path, *, apply=False, actor_id=None):
             """, (actor_id,)).fetchone() is None:
                 raise PermissionError("An active administrator is required to apply a contact import.")
             initialize(connection)
-        has_evidence = _has_evidence_table(connection)
+        has_evidence = table_exists(connection, "cvent_contact_evidence")
         for group in _candidates(connection, rows, counts):
             candidate = group[0]
             account_ids.add(candidate.account_id)
             counts["eligible_people"] += 1
             person = connection.execute("""
-                SELECT id FROM people WHERE account_id = ? AND email = ? COLLATE NOCASE
+                SELECT id FROM people WHERE account_id = ? AND email = ?
             """, (candidate.account_id, candidate.email)).fetchone()
             person_id = person["id"] if person else None
             if person_id is None:

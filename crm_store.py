@@ -1,12 +1,25 @@
 """Local accounts and the saved source records that support them."""
 
 import json
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 
 DEFAULT_DB = Path(__file__).resolve().parent / "instance" / "demo.sqlite3"
+
+
+def is_postgres(database):
+    return isinstance(database, str) and database.startswith(("postgresql://", "postgres://"))
+
+
+def configured_database():
+    database = os.environ.get("DATABASE_URL")
+    if database and not is_postgres(database):
+        raise ValueError("DATABASE_URL must be a PostgreSQL connection URL.")
+    return database or DEFAULT_DB
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -59,6 +72,10 @@ WHERE r.source = 'cvent';
 
 
 def connect(database_path, *, read_only=False):
+    if is_postgres(database_path):
+        from postgres_store import PostgresConnection
+
+        return PostgresConnection(database_path, read_only=read_only)
     path = Path(database_path).resolve()
     database = f"{path.as_uri()}?mode=ro" if read_only else path
     connection = sqlite3.connect(database, uri=read_only, timeout=15)
@@ -68,10 +85,24 @@ def connect(database_path, *, read_only=False):
 
 
 def initialize(database_path):
-    Path(database_path).parent.mkdir(parents=True, exist_ok=True)
+    postgres = is_postgres(database_path)
+    if not postgres:
+        Path(database_path).parent.mkdir(parents=True, exist_ok=True)
     with closing(connect(database_path)) as connection:
-        connection.execute("PRAGMA journal_mode = WAL").fetchone()
+        if postgres:
+            connection.execute("CREATE EXTENSION IF NOT EXISTS citext")
+        else:
+            connection.execute("PRAGMA journal_mode = WAL").fetchone()
         connection.executescript(SCHEMA)
+
+
+def table_exists(connection, name):
+    if getattr(connection, "dialect", "sqlite") == "postgresql":
+        sql = """SELECT 1 FROM information_schema.tables
+                 WHERE table_schema = current_schema() AND table_name = ?"""
+    else:
+        sql = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
+    return connection.execute(sql, (name,)).fetchone() is not None
 
 
 def account_summaries(connection):

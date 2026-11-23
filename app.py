@@ -4,7 +4,6 @@ import argparse
 import os
 import secrets
 from contextlib import closing
-from pathlib import Path
 
 from flask import Flask, abort, g, jsonify, redirect, render_template, request, url_for
 from werkzeug.exceptions import HTTPException
@@ -20,16 +19,19 @@ import source_ops
 import source_review
 import workflow_store
 import workflow_web
-from crm_store import DEFAULT_DB, connect, directory_listings, initialize, record_evidence
+from crm_store import configured_database, connect, directory_listings, initialize, record_evidence
 from cvent_reads import get_all_cvent_events, get_cvent_event_by_id
 
 
-def create_app(database_path=DEFAULT_DB, *, demo=False):
+def create_app(database_path=None, *, demo=False):
+    if database_path is None:
+        database_path = configured_database()
     app = Flask(__name__)
     app.config.update(
         DATABASE=database_path,
         SECRET_KEY=os.environ.get("CRM_SECRET_KEY") or secrets.token_hex(32),
         SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=os.environ.get("RENDER") == "true",
         MAX_CONTENT_LENGTH=12 * 1024 * 1024,
         MACHINE_ENDPOINTS=scraper_ingest.API_ENDPOINTS,
         PLANNING_MONTHS_MIN=int(os.environ.get("CRM_PLANNING_MONTHS_MIN", "4")),
@@ -202,7 +204,7 @@ def create_app(database_path=DEFAULT_DB, *, demo=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    parser.add_argument("--db", help="SQLite file or PostgreSQL URL. Defaults to DATABASE_URL when set.")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--demo", action="store_true", help="Seed synthetic local users.")
     args = parser.parse_args()

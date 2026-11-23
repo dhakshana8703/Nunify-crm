@@ -240,12 +240,13 @@ def _queue_qualification_job(connection, user, scope, observed, planning):
               w.owner_id IS NULL
               AND COALESCE(w.stage, 'discovered') IN ('discovered', 'qualified', 'disqualified')
               AND COALESCE(w.stage, 'discovered') <> CASE
-                  WHEN COALESCE(q.override, q.score >= :cutoff) THEN 'qualified' ELSE 'disqualified' END
+                  WHEN COALESCE(q.override = 1, q.score >= :cutoff) THEN 'qualified' ELSE 'disqualified' END
           ))
         GROUP BY r.account_id
-        HAVING :scope = 'all' OR (:scope = 'cvent' AND MAX(r.source = 'cvent'))
-            OR (:scope = 'directory' AND MAX(r.source = 'directory'))
-            OR (:scope = 'both' AND MAX(r.source = 'cvent') AND MAX(r.source = 'directory'))
+        HAVING :scope = 'all'
+            OR (:scope IN ('cvent', 'both') AND COUNT(CASE WHEN r.source = 'cvent' THEN 1 END) > 0
+                AND (:scope != 'both' OR COUNT(CASE WHEN r.source = 'directory' THEN 1 END) > 0))
+            OR (:scope = 'directory' AND COUNT(CASE WHEN r.source = 'directory' THEN 1 END) > 0)
     """, {"job_id": job_id, "scope": scope, "cutoff": config["qualified_at"]}).rowcount
     connection.execute("UPDATE qualification_jobs SET total = ? WHERE id = ?", (target_count, job_id))
     audit(connection, user["id"], None, "qualification_job_queued",
@@ -343,9 +344,10 @@ def queue_job(connection, account, person_id, user, *, observed, auto=False):
             return False
     action = "email_unlock" if person_id else "people_search"
     existing = connection.execute("""
-        SELECT 1 FROM credit_jobs WHERE account_id = ? AND person_id IS ? AND action = ?
+        SELECT 1 FROM credit_jobs WHERE account_id = ? AND action = ?
+          AND (person_id = ? OR (person_id IS NULL AND CAST(? AS INTEGER) IS NULL))
           AND state IN ('queued', 'processing', 'failed', 'done')
-    """, (account_id, person_id, action)).fetchone()
+    """, (account_id, action, person_id, person_id)).fetchone()
     if existing:
         return False
     day = local_date(user, observed).isoformat()
@@ -549,13 +551,18 @@ def source_funnel(connection):
             SELECT source_slug AS source_name, account_id FROM imported_source_evidence
         )
         SELECT source_name, COUNT(*) AS discovered,
-               SUM(EXISTS(SELECT 1 FROM qualifications q WHERE q.account_id = e.account_id)) AS scored,
-               SUM(EXISTS(SELECT 1 FROM account_work w
-                          WHERE w.account_id = e.account_id AND w.owner_id IS NOT NULL)) AS assigned,
-               SUM(EXISTS(SELECT 1 FROM activities a WHERE a.account_id = e.account_id)) AS worked,
-               SUM(EXISTS(SELECT 1 FROM handoffs h WHERE h.account_id = e.account_id)) AS positive,
-               SUM(EXISTS(SELECT 1 FROM handoffs h
-                          WHERE h.account_id = e.account_id AND h.status = 'delivered')) AS delivered,
+               COUNT(CASE WHEN EXISTS(SELECT 1 FROM qualifications q WHERE q.account_id = e.account_id)
+                          THEN 1 END) AS scored,
+               COUNT(CASE WHEN EXISTS(SELECT 1 FROM account_work w
+                                      WHERE w.account_id = e.account_id AND w.owner_id IS NOT NULL)
+                          THEN 1 END) AS assigned,
+               COUNT(CASE WHEN EXISTS(SELECT 1 FROM activities a WHERE a.account_id = e.account_id)
+                          THEN 1 END) AS worked,
+               COUNT(CASE WHEN EXISTS(SELECT 1 FROM handoffs h WHERE h.account_id = e.account_id)
+                          THEN 1 END) AS positive,
+               COUNT(CASE WHEN EXISTS(SELECT 1 FROM handoffs h
+                                      WHERE h.account_id = e.account_id AND h.status = 'delivered')
+                          THEN 1 END) AS delivered,
                SUM(COALESCE((SELECT SUM(credits) FROM credit_ledger l WHERE l.account_id = e.account_id), 0)) AS credits
         FROM evidence e GROUP BY source_name ORDER BY source_name
     """).fetchall()

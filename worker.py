@@ -10,7 +10,7 @@ import growth_ops
 import sales_extensions
 import source_ops
 import workflow_store
-from crm_store import DEFAULT_DB, connect, initialize
+from crm_store import configured_database, connect, initialize
 
 
 def run_pass(connection, cvent_dir, directory_dir):
@@ -23,14 +23,15 @@ def run_pass(connection, cvent_dir, directory_dir):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    parser.add_argument("--db", help="SQLite file or PostgreSQL URL. Defaults to DATABASE_URL when set.")
     parser.add_argument("--cvent-dir", type=Path, default=source_ops.SOURCE_PARENT / "cvent-scrapper")
     parser.add_argument("--directory-dir", type=Path, default=source_ops.SOURCE_PARENT / "association")
     parser.add_argument("--offline", action="store_true", required=True)
     parser.add_argument("--once", action="store_true", help="Drain current jobs and exit.")
     args = parser.parse_args()
-    initialize(args.db)
-    with closing(connect(args.db)) as connection:
+    database = args.db or configured_database()
+    initialize(database)
+    with closing(connect(database)) as connection:
         workflow_store.initialize(connection)
         sales_extensions.initialize(connection)
         source_ops.initialize(connection)

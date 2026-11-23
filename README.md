@@ -29,6 +29,25 @@ The worker reads saved source exports and uses local adapters for Apollo and AE 
 | AE | `ae@example.test` |
 | Admin | `admin@example.test` |
 
+## Hosted pilot on Render and Neon
+
+Use a dedicated, empty Neon database for the CRM pilot. Create a Render Python Web Service from the branch with this release. Select the Free instance and set the health check path to `/login`.
+
+| Render setting | Value |
+| --- | --- |
+| Build Command | `pip install -r requirements.txt gunicorn` |
+| Start Command | `gunicorn --workers 1 --bind 0.0.0.0:$PORT 'pilot_web:create_pilot_app()'` |
+
+In Render's **Environment** settings, set `DATABASE_URL` to the direct Neon connection string. Generate a separate `CRM_SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex(32))"`. Add a distinct strong password for each pilot role.
+
+| Environment variable | Pilot sign-in |
+| --- | --- |
+| `CRM_ADMIN_PASSWORD` | `admin@pilot.example` |
+| `CRM_MANAGER_PASSWORD` | `manager@pilot.example` |
+| `CRM_SDR_PASSWORD` | `sdr@pilot.example` |
+
+The first start creates the pilot sign-ins and adds **Pilot Association** to an empty account list. Assign the sample company to the SDR, save a simulated call with **Use tomorrow**, then redeploy and check the saved follow-up. The pilot starts the web app. Source jobs need a worker, and saved local CRM data needs a separate migration.
+
 ## Load and work accounts
 
 For a role-by-role walkthrough, use the [manual SDR trial guide](docs/manual-sdr-trial.md).
@@ -66,5 +85,7 @@ Use `--source` to select a matching read-only cache snapshot. Add `--apply --adm
 ```powershell
 python -B -m unittest discover -s tests -v
 ```
+
+To include the PostgreSQL rehearsal, set `CRM_TEST_POSTGRES_URL` to a disposable database and rerun the suite. The test uses a dedicated temporary schema and exercises the Admin, Manager and SDR flow across an app restart.
 
 See [workflow design](docs/workflow-design.md), [delivery and verification](docs/workflow-delivery.md), and Goutham's [architecture](docs/architecture.md) and [stories](docs/stories/00_README.md).

@@ -53,7 +53,8 @@ def _event_order(sort_by, sort_dir):
     if column is None:
         return "id"
     direction = "DESC" if sort_dir == "desc" else "ASC"
-    value_order = f"{column} {direction}, id"
+    null_order = "LAST" if direction == "DESC" else "FIRST"
+    value_order = f"{column} {direction} NULLS {null_order}, id"
     if sort_by in ("date", "company", "city"):
         return f"CASE WHEN COALESCE({column}, '') = '' THEN 1 ELSE 0 END, {value_order}"
     return value_order

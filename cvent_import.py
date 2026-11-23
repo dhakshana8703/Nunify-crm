@@ -364,10 +364,10 @@ def evaluate(connection, row, policy, *, promote=False):
         ON CONFLICT (source, source_id) DO UPDATE SET
             source_url = excluded.source_url, source_file = excluded.source_file,
             details_json = excluded.details_json, raw_json = excluded.raw_json
-        WHERE source_records.source_url IS NOT excluded.source_url
-           OR source_records.source_file IS NOT excluded.source_file
-           OR source_records.details_json IS NOT excluded.details_json
-           OR source_records.raw_json IS NOT excluded.raw_json
+        WHERE source_records.source_url <> excluded.source_url
+           OR source_records.source_file <> excluded.source_file
+           OR source_records.details_json <> excluded.details_json
+           OR source_records.raw_json <> excluded.raw_json
     """, (row["source_id"], row["source_url"], row["source_file"], account_id,
           json.dumps(details, sort_keys=True, ensure_ascii=False), json.dumps(row["raw"], sort_keys=True, ensure_ascii=False)))
     result, detail = ("imported", "Linked to the organization.") if changed.rowcount else (

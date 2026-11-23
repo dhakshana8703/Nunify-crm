@@ -688,8 +688,14 @@ def selected_person(account_id):
     value = request.form.get("person_id", "")
     if not value:
         return None
+    try:
+        person_id = int(value)
+    except ValueError:
+        abort(400, "Choose a contact from this account.")
+    if not -(2**63) <= person_id < 2**63:
+        abort(400, "Choose a contact from this account.")
     row = db().execute(
-        "SELECT * FROM people WHERE id = ? AND account_id = ?", (value, account_id),
+        "SELECT * FROM people WHERE id = ? AND account_id = ?", (person_id, account_id),
     ).fetchone()
     if not row:
         abort(400, "Choose a contact from this account.")
@@ -704,7 +710,8 @@ def apply_activity_state(account, person, outcome, direction):
     if person and person_status:
         if not person["do_not_contact"] or outcome in {"bounced", "opted_out"}:
             db().execute("""
-                UPDATE people SET status = ?, do_not_contact = MAX(do_not_contact, ?) WHERE id = ?
+                UPDATE people SET status = ?, do_not_contact = CASE WHEN ? = 1 THEN 1 ELSE do_not_contact END
+                WHERE id = ?
             """, (person_status, int(outcome in {"bounced", "opted_out"}), person["id"]))
         if outcome == "opted_out" and person["email"]:
             db().execute("""

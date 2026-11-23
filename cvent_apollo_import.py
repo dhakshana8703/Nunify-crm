@@ -11,7 +11,7 @@ from pathlib import Path
 
 from werkzeug.security import check_password_hash
 
-from crm_store import connect
+from crm_store import connect, table_exists
 from cvent_contacts import BLOCKED_STATUSES, SOURCE_PARENT, _blocked, _work_email
 from cvent_import import _host, _names, _platform, _text
 from workflow_store import audit, normalized_linkedin_profile, timestamp, transaction
@@ -124,12 +124,6 @@ def _channels(lead):
     ]
 
 
-def _has_crosswalk(connection):
-    return connection.execute("""
-        SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cvent_apollo_leads'
-    """).fetchone() is not None
-
-
 def import_leads(connection, source_path, *, apply=False, actor_id=None):
     """Import verified account matches and return an aggregate run summary."""
     candidates, verified = _snapshot(source_path)
@@ -155,7 +149,7 @@ def import_leads(connection, source_path, *, apply=False, actor_id=None):
                        p.do_not_contact, p.status
                 FROM cvent_apollo_leads m JOIN people p ON p.id = m.person_id
             """)
-        } if _has_crosswalk(connection) else {}
+        } if table_exists(connection, "cvent_apollo_leads") else {}
         people_channels = {
             channel: row["id"]
             for row in connection.execute("SELECT id, account_id, email, linkedin_url FROM people")
