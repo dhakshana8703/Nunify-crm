@@ -42,11 +42,11 @@ In Render's **Environment** settings, set `DATABASE_URL` to the direct Neon conn
 
 | Environment variable | Pilot sign-in |
 | --- | --- |
-| `CRM_ADMIN_PASSWORD` | `admin@pilot.example` |
-| `CRM_MANAGER_PASSWORD` | `manager@pilot.example` |
-| `CRM_SDR_PASSWORD` | `sdr@pilot.example` |
+| `CRM_ADMIN_PASSWORD` | `admin@nunify.com` |
+| `CRM_MANAGER_PASSWORD` | `manager@nunify.com` |
+| `CRM_SDR_PASSWORD` | `riya@nunify.com` |
 
-The first start creates the pilot sign-ins and adds **Pilot Association** to an empty account list. Assign the sample company to the SDR, save a simulated call with **Use tomorrow**, then redeploy and check the saved follow-up. The pilot starts the web app. Source jobs need a worker, and saved local CRM data needs a separate migration.
+The first start creates the pilot sign-ins and adds **Pilot Association** to an empty account list. An earlier pilot's test sign-ins are renamed in place, preserving users' assignments and history. Updated environment passwords take effect on deployment. Assign the sample company to the SDR, save a simulated call with **Use tomorrow**, then redeploy and check the saved follow-up. The pilot starts the web app. Source jobs need a worker, and saved local CRM data needs a separate migration.
 
 ## Load and work accounts
 
