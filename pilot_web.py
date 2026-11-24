@@ -15,11 +15,21 @@ PILOT_USERS = (
     ("Pilot Manager", "manager@nunify.com", "manager@pilot.example", "manager", "CRM_MANAGER_PASSWORD"),
     ("Riya Rao", "riya@nunify.com", "sdr@pilot.example", "sdr", "CRM_SDR_PASSWORD"),
 )
+ADDITIONAL_PILOT_SDRS = (
+    ("Arjun Mehta", "arjun@nunify.com", "CRM_ARJUN_PASSWORD"),
+    ("Neha Shah", "neha@nunify.com", "CRM_NEHA_PASSWORD"),
+    ("Kavya Nair", "kavya@nunify.com", "CRM_KAVYA_PASSWORD"),
+)
 
 
 def configure_pilot_users(connection):
+    users = list(PILOT_USERS)
+    for name, email, variable in ADDITIONAL_PILOT_SDRS:
+        if os.environ.get(variable):
+            users.append((name, email, None, "sdr", variable))
+
     with transaction(connection):
-        for name, email, legacy_email, role, variable in PILOT_USERS:
+        for name, email, legacy_email, role, variable in users:
             matches = connection.execute("""
                 SELECT id, email, role, password_hash FROM users WHERE email IN (?, ?)
             """, (email, legacy_email)).fetchall()

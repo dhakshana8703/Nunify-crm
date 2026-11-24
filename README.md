@@ -38,15 +38,18 @@ Use a dedicated, empty Neon database for the CRM pilot. Create a Render Python W
 | Build Command | `pip install -r requirements.txt gunicorn` |
 | Start Command | `gunicorn --workers 1 --bind 0.0.0.0:$PORT 'pilot_web:create_pilot_app()'` |
 
-In Render's **Environment** settings, set `DATABASE_URL` to the direct Neon connection string. Generate a separate `CRM_SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex(32))"`. Add a distinct strong password for each pilot role.
+In Render's **Environment** settings, set `DATABASE_URL` to the direct Neon connection string. Generate a separate `CRM_SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex(32))"`. Add a distinct password for each pilot user.
 
 | Environment variable | Pilot sign-in |
 | --- | --- |
 | `CRM_ADMIN_PASSWORD` | `admin@nunify.com` |
 | `CRM_MANAGER_PASSWORD` | `manager@nunify.com` |
 | `CRM_SDR_PASSWORD` | `riya@nunify.com` |
+| `CRM_ARJUN_PASSWORD` | `arjun@nunify.com` |
+| `CRM_NEHA_PASSWORD` | `neha@nunify.com` |
+| `CRM_KAVYA_PASSWORD` | `kavya@nunify.com` |
 
-The first start creates the pilot sign-ins and adds **Pilot Association** to an empty account list. An earlier pilot's test sign-ins are renamed in place, preserving users' assignments and history. Updated environment passwords take effect on deployment. Assign the sample company to the SDR, save a simulated call with **Use tomorrow**, then redeploy and check the saved follow-up. The pilot starts the web app. Source jobs need a worker, and saved local CRM data needs a separate migration.
+The first start creates the admin, manager, and Riya sign-ins and adds **Pilot Association** to an empty account list. Set the additional password variables to create separate logins for Arjun, Neha, and Kavya. Each active SDR appears in the manager's assignment dropdown. An earlier pilot's test sign-ins are renamed in place, preserving users' assignments and history. Updated environment passwords take effect on deployment. Assign the sample company to an SDR, save a simulated call with **Use tomorrow**, then redeploy and check the saved follow-up. The pilot starts the web app. Source jobs need a worker, and saved local CRM data needs a separate migration.
 
 ## Load and work accounts
 

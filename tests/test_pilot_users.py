@@ -73,6 +73,60 @@ class PilotUsersTest(unittest.TestCase):
                 _, response = self.login(email, token_urlsafe(20))
                 self.assertEqual(response.status_code, 401)
 
+    def test_manager_can_assign_to_each_configured_sdr(self):
+        reps = (
+            ("riya", "CRM_SDR_PASSWORD"),
+            ("arjun", "CRM_ARJUN_PASSWORD"),
+            ("neha", "CRM_NEHA_PASSWORD"),
+            ("kavya", "CRM_KAVYA_PASSWORD"),
+        )
+        self.configure(self.passwords)
+        riya_id = self.users()["riya@nunify.com"]["id"]
+        passwords = {**self.passwords, **{key: token_urlsafe(20) for _, key in reps[1:]}}
+        self.configure(passwords)
+        users = self.users()
+        self.assertEqual(users["riya@nunify.com"]["id"], riya_id)
+        accounts = {}
+        with closing(connect(self.database)) as connection, connection:
+            for name, _ in reps:
+                accounts[name] = connection.execute("""
+                    INSERT INTO accounts(identity_key, name, domain, organization_type)
+                    VALUES (?, ?, ?, 'Association')
+                """, (name, f"Sample account for {name}", f"{name}.example")).lastrowid
+
+        manager, response = self.login("manager@nunify.com", self.passwords["CRM_MANAGER_PASSWORD"])
+        self.assertEqual((response.status_code, response.location), (303, "/assignment"))
+        assignment_page = manager.get("/assignment", base_url="https://test.example")
+        self.assertEqual(assignment_page.status_code, 200)
+        assignment_html = assignment_page.get_data(as_text=True)
+        for name, _ in reps:
+            with self.subTest(sdr=name):
+                email = f"{name}@nunify.com"
+                rep = users[email]
+                self.assertEqual(rep["role"], "sdr")
+                action = f"/assignment/{accounts[name]}"
+                form = RenderedForm(action)
+                form.feed(assignment_html)
+                self.assertTrue(form.found, action)
+                owner_form = assignment_html.partition(f'action="{action}"')[2].partition("</form>")[0]
+                self.assertIn(f'<option value="{rep["id"]}">{rep["name"]}</option>', owner_form)
+                assigned = manager.post(action, data={**form.hidden, "owner_id": rep["id"]},
+                                        base_url="https://test.example")
+                self.assertEqual(assigned.status_code, 303)
+
+        self.configure(self.passwords)
+        for name, key in reps:
+            with self.subTest(sdr=name):
+                client, response = self.login(f"{name}@nunify.com", passwords[key])
+                self.assertEqual((response.status_code, response.location), (303, "/today"))
+                self.assertEqual(client.get(f"/accounts/{accounts[name]}", base_url="https://test.example").status_code, 200)
+                peer = "arjun" if name == "riya" else "riya"
+                self.assertEqual(client.get(f"/accounts/{accounts[peer]}", base_url="https://test.example").status_code, 403)
+
+        with closing(connect(self.database, read_only=True)) as connection:
+            owners = dict(connection.execute("SELECT account_id, owner_id FROM account_work"))
+        self.assertEqual(owners, {accounts[name]: users[f"{name}@nunify.com"]["id"] for name, _ in reps})
+
     def test_legacy_user_rename_preserves_work_and_restart_is_idempotent(self):
         previous_password = token_urlsafe(20)
         with closing(connect(self.database)) as connection, connection:
