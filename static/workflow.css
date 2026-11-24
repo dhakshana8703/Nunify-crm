@@ -77,8 +77,8 @@
 .workflow-form .tomorrow-shortcut input { width: auto; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent); }
 .workflow-filters { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; padding: 0.95rem 1.4rem; border-bottom: 1px solid var(--border); }
 .workflow-filters .grow { flex: 1 1 13rem; }
-.workflow-filters .company-picker { flex: 1 1 16rem; min-width: 0; }
-.workflow-filters .company-picker select { min-width: 0; }
+.workflow-filters .company-picker { flex: 1 1 22rem; min-width: 0; }
+.workflow-filters .company-picker select { min-width: 0; min-height: 2.75rem; }
 .assign-form { display: flex; align-items: end; gap: 0.65rem; }
 .assign-form label { min-width: 8.5rem; }
 .assignment-account { display: flex; align-items: start; gap: 0.75rem; }

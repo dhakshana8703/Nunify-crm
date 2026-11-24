@@ -5,7 +5,7 @@
 Use the [Association and Cvent trial](http://127.0.0.1:5002/login) for this first test. The old port 5001 address opens the same sign-in. Use the passwords provided in the trial handoff.
 
 1. **Admin.** Sign in as `admin@nunify.com`. On **Sources**, open the Ready **Cvent - master_cvent_events.json** run, or click **Stage Cvent export** to start a fresh preview. The run page updates as the worker progresses. When it is Ready, open **Review unresolved records** to see what needs a check, then use **Promote eligible events** to apply the eligible rows. The saved export in this trial has 542 records.
-2. **Manager.** Sign out and sign in as `manager@nunify.com`. On **Assignments**, set **Owner status** to **Qualified and unassigned** and choose **SIFMA** from **Company**. Select **Riya Rao** under **New owner**, then click **Assign**. Look for **Assignment saved for SIFMA**. If Riya already owns SIFMA, start with step 3.
+2. **Manager.** Sign out and sign in as `manager@nunify.com`. On **Assignments**, set **Owner status** to **Qualified and unassigned** and select **SIFMA** under **Choose a company**. Select **Riya Rao** under **New owner**, then click **Assign**. Look for **Assignment saved for SIFMA**. If Riya already owns SIFMA, start with step 3.
 3. **SDR.** Sign out and sign in as `riya@nunify.com`. Open **SIFMA** from **Today** or **My Accounts**. Check its **Cvent** tag, source evidence, and **Contacts**. Choose a contact marked **Previously unlocked** for the exercise. In **Log activity**, simulate a **Call** with **No answer**. Check **Use tomorrow**, set **Next action** to `Call SIFMA again`, and click **Save activity**. Open **Today**, then **Tomorrow**. You should see one follow-up under SIFMA.
 4. **Manager check.** Sign in as the manager again. Open **SIFMA** and check **Follow-ups** for Riya's saved task.
 
@@ -119,7 +119,7 @@ Neha can work the account during coverage. Riya stays the owner, and the timelin
 
 ## 8. Try a permanent transfer last
 
-1. Make sure an open Wested task exists. As manager, go to **Assignments** and search for `Wested` in **Find a company**.
+1. Make sure an open Wested task exists. As manager, go to **Assignments** and select **Wested** under **Choose a company**.
 2. Select Neha as the new owner and click **Transfer**.
 3. As Neha, open **My Accounts** and Wested's **Follow-ups**. As Riya, try the account link again.
 

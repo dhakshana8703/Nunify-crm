@@ -68,17 +68,14 @@
       <h2 id="assignments-heading">Account owners</h2>
       <span class="count-tag" data-assignment-count role="status">{{ pagination.total }} {{ 'account' if pagination.total == 1 else 'accounts' }}</span>
     </header>
-    <form class="workflow-filters" action="{{ url_for('workflow.assignment') }}" method="get" data-assignment-search>
-      <label class="company-picker">Company
+    <form id="assignment-filters" class="workflow-filters" action="{{ url_for('workflow.assignment') }}" method="get" data-assignment-filters>
+      <label class="company-picker">Choose a company
         <select name="company" aria-controls="assignment-results">
           <option value="">All companies</option>
           {% for account in company_options %}
             <option value="{{ account.id }}"{% if selected_company == account.id %} selected{% endif %}>{{ account.name }}{% if account.domain %} - {{ account.domain }}{% endif %}</option>
           {% endfor %}
         </select>
-      </label>
-      <label class="grow">Find a company
-        <input type="search" name="search" value="{{ search }}" placeholder="Company name or domain" autocomplete="off" aria-controls="assignment-results">
       </label>
       <label>Owner status
         <select name="filter">
@@ -129,6 +126,12 @@
       <button type="submit" class="button">Apply</button>
     </form>
     <div id="assignment-results" data-assignment-results>
+    {% if search %}
+      <div class="workflow-panel-body">
+        <span>Companies matching “{{ search }}”</span>
+        <button type="submit" form="assignment-filters" class="button button-small">Clear search</button>
+      </div>
+    {% endif %}
     {% set assignable_items = items|rejectattr('blocked')|list %}
     {% if reps and assignable_items %}
       <form id="bulk-assignment-form" class="workflow-filters" action="{{ url_for('workflow.assign_bulk', **assignment_filters) }}" method="post">

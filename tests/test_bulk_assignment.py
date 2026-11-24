@@ -131,19 +131,38 @@ class BulkAssignmentTest(unittest.TestCase):
 
         first_page = manager.get("/assignment?source=directory")
         self.assertNotIn(f"{company_id}:0", self.selections(first_page))
+        self.assertIn(b"Choose a company", first_page.data)
+        self.assertNotIn(b'type="search" name="search"', first_page.data)
+        self.assertNotIn(b"Clear search", first_page.data)
         company_picker = re.search(
             r'<select[^>]*name="company"[^>]*>(.*?)</select>',
             first_page.get_data(as_text=True), re.DOTALL,
         )
         self.assertIsNotNone(company_picker)
+        self.assertIn('<option value="">All companies</option>', company_picker[1])
         self.assertIn(f'value="{company_id}"', company_picker[1])
+
+        legacy_search = manager.get("/assignment?source=directory&search=Boreal")
+        self.assertEqual(self.selections(legacy_search), [f"{self.directory}:0"])
+        self.assertRegex(
+            legacy_search.get_data(as_text=True),
+            r'<button\b[^>]*\bform="assignment-filters"[^>]*>Clear search</button>',
+        )
+        empty_search = manager.get("/assignment?source=directory&search=missing-company")
+        self.assertEqual(self.selections(empty_search), [])
+        self.assertIn(b"Clear search", empty_search.data)
 
         route = f"/assignment?source=directory&company={company_id}"
         selected = manager.get(route + "&search=Alpine")
         self.assertEqual(self.selections(selected), [f"{company_id}:0"])
         selection = f'<option value="{company_id}" selected>'
         self.assertIn(selection, selected.get_data(as_text=True))
+        self.assertNotIn(b"Clear search", selected.data)
         self.assertEqual(rep.get(route).status_code, 403)
+
+        reset = manager.get("/assignment?source=directory&company=")
+        self.assertEqual(self.selections(reset), self.selections(first_page))
+        self.assertNotIn(selection, reset.get_data(as_text=True))
 
         excluded = manager.get(f"/assignment?source=cvent&company={company_id}")
         self.assertEqual(self.selections(excluded), [f"{self.both}:0", f"{self.cvent}:0"])
