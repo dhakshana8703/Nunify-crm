@@ -2,6 +2,7 @@
 
 import json
 
+from account_facts_store import refresh_account_facts
 from crm_core.source_review import replay_result as replay_decision
 from workflow_store import audit, is_blocked, timestamp
 
@@ -96,7 +97,7 @@ class ReviewStore:
         return is_blocked(self.connection, account_id)
 
     def save_link(self, source, source_id, account_id, details, payload):
-        self.connection.execute("""
+        linked = self.connection.execute("""
             INSERT INTO source_records
                 (source, source_id, source_url, source_file, account_id, review_reason, details_json, raw_json)
             VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
@@ -107,6 +108,8 @@ class ReviewStore:
             WHERE source_records.account_id IS NULL
         """, (source, source_id, payload["source_url"], payload["source_file"], account_id,
               json.dumps(details, sort_keys=True), json.dumps(payload["raw"], sort_keys=True)))
+        if linked.rowcount:
+            refresh_account_facts(self.connection, (account_id,))
 
     def save_decision(self, row, state, reason, evidence_url, account_id, actor_id, observed):
         self.connection.execute("""

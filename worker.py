@@ -9,6 +9,7 @@ from pathlib import Path
 
 import worker_status
 import workflow_store
+from account_facts_store import initialize_account_facts, refresh_daily_account_facts
 from crm_core.growth import QUALIFICATION_BATCH_SIZE, enrich_next, run_qualification_batch, score_qualification
 from crm_core.handoffs import deliver_pending_handoff
 from crm_store import configured_database, connect, initialize
@@ -28,6 +29,7 @@ def run_pass(connection, cvent_dir, directory_dir, *, connectors=None):
                                  clock=clock)
     qualification = run_qualification_batch(growth, partial(score_qualification, growth), clock=clock,
                                             limit=QUALIFICATION_BATCH_SIZE)
+    refresh_daily_account_facts(connection, clock())
     return handoff, credit, sources, qualification
 
 
@@ -47,6 +49,7 @@ def main():
         initialize_handoffs(connection)
         initialize_sources(connection)
         initialize_growth(connection)
+        initialize_account_facts(connection)
         next_status_update = 0
         while True:
             try:

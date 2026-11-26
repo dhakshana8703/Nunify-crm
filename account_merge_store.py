@@ -2,6 +2,7 @@
 
 import json
 
+from account_facts_store import refresh_account_facts
 from account_identity_schema import refresh_account_roots
 from crm_store import table_exists
 from suppression_projection import account_projection_available, refresh_account_suppression
@@ -75,6 +76,7 @@ class SqlAccountMergeStore:
         refresh_account_roots(self.connection)
         if account_projection_available(self.connection):
             refresh_account_suppression(self.connection, (winner,))
+        refresh_account_facts(self.connection, (winner,), observed=observed)
         audit(self.connection, actor_id, winner, "account_merge", {
             "from_ids": losers, "to_id": winner, "counts": plan["counts"],
             "allocations_before": witness["account_work"], "qualifications_before": witness["qualifications"],

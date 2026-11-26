@@ -8,6 +8,11 @@ ORGANIZATION_TYPES = (
 )
 
 
+def organization_type_or_unknown(value=None):
+    normalized = value.strip().casefold() if isinstance(value, str) else ""
+    return next((kind for kind in ORGANIZATION_TYPES if kind.casefold() == normalized), "Unknown")
+
+
 class OrganizationTypeConflict(ValueError):
     pass
 

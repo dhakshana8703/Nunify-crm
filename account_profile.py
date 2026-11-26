@@ -13,7 +13,22 @@ bp = Blueprint("account_profile", __name__)
 
 def context(connection, account, listings):
     qualification, cvent = SqlAccountProfile(connection).evidence(account["id"])
-    return describe_profile(listings, qualification, cvent=cvent)
+    profile = describe_profile(listings, qualification, cvent=cvent)
+    profile.update(events_per_year=None, region=None)
+    if account.get("facts_as_of"):
+        platform = account["platform"]
+        confidence = account["platform_confidence"]
+        labels = {"cvent": "Cvent", "other_detected": account["platform_detail"], "none": "None", "unknown": "Unknown"}
+        label = None
+        if confidence == "confirmed":
+            label = ("Confirmed by event evidence" if cvent else "Confirmed by Cvent company evidence"
+                     if platform == "cvent" else "Confirmed")
+        elif confidence == "detected":
+            label = "Detected in saved website evidence"
+        profile.update(platform=labels[platform], platform_confidence=label,
+                       country=account["country"], region=account["region"],
+                       members=account["members"], events_per_year=account["events_per_year"])
+    return profile
 
 
 @bp.post("/accounts/<int:account_id>/organization-type")

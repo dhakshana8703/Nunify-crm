@@ -17,6 +17,10 @@ QUALIFICATION_SCOPES = {
     "directory": "Directory of Associations", "both": "Both sources",
 }
 QUALIFICATION_BATCH_SIZE = 50
+ACCOUNT_STAGES = (
+    "discovered", "qualified", "disqualified", "enriched", "assigned",
+    "working", "engaged", "positive", "handed_off", "nurture",
+)
 FIT_STAGES = {"discovered", "qualified", "disqualified"}
 DEFAULT_RULES = {
     "conference_terms": ["conference", "annual meeting", "summit", "convention", "expo", "symposium"],
@@ -59,8 +63,8 @@ class GrowthStore(Protocol):
     def save_rules(self, config): ...
     def evidence(self, account_id): ...
     def save_qualification(self, account_id, score, signals, observed): ...
-    def fit_work_state(self, account_id): ...
-    def apply_fit_stage(self, account_id, stage, expected_revision): ...
+    def work_state(self, account_id): ...
+    def apply_stage(self, account_id, stage, expected_revision): ...
     def qualification(self, account_id): ...
     def active_qualification_job(self): ...
     def create_qualification_job(self, user_id, scope, config, observed, day, planning): ...
@@ -137,10 +141,10 @@ def account_credit_access(store: GrowthStore, user, qualification, config, *, ob
 
 
 def _stage(store, account_id, fit):
-    state = store.fit_work_state(account_id)
+    state = store.work_state(account_id)
     stage = _next_fit_stage(state, fit)
     if stage is not None:
-        store.apply_fit_stage(account_id, stage, state["revision"] if state is not None else None)
+        store.apply_stage(account_id, stage, state["revision"] if state is not None else None)
 
 
 def _next_fit_stage(work, fit):
@@ -391,7 +395,13 @@ def enrich_next(store: GrowthStore, provider: EnrichmentProvider, *, clock):
             if person_id:
                 store.save_unlocked_email(person_id, result["email"])
             else:
-                store.save_enriched_contact(account_id, result["name"], result["title"])
+                name, title = result["name"], result["title"]
+                if not isinstance(name, str) or not name.strip() or not isinstance(title, str):
+                    raise GrowthInvalid("The enrichment provider returned an invalid contact.")
+                store.save_enriched_contact(account_id, name, title)
+                work = store.work_state(account_id)
+                if work is None or work["stage"] in {"discovered", "qualified"}:
+                    store.apply_stage(account_id, "enriched", work["revision"] if work is not None else None)
             store.complete_credit_job(job_id)
     except Exception as error:
         with store.atomic():

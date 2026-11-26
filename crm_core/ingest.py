@@ -6,6 +6,7 @@ import re
 from typing import Protocol
 
 from crm_core.account_identity import corroborated_account
+from crm_core.account_profile import organization_type_or_unknown
 from organization_identity import (
     is_platform_domain, normalize_dns_hostname, normalized_words, organization_host, root_domain,
 )
@@ -51,15 +52,6 @@ def _match_account(repository, domain, name):
     if account is not None:
         return dict(account, id=account.get("canonical_id", account["id"])), ""
     return None, "The domain is shared with a differently named or ambiguous account." if candidates else ""
-
-
-def _organization_type(name):
-    words = set(normalized_words(name).split())
-    if words & {"association", "federation", "society"}:
-        return "Association"
-    if words & {"university", "college"}:
-        return "University"
-    return "Unknown"
 
 
 def _apply_saved(repository, source, row, details, existing, account_id, name, domain, organization_type, promote):
@@ -134,8 +126,9 @@ def _cvent(repository, row, promote):
         return "review", "The saved organization domain is a shared registration or communications platform."
     if organizer_domain:
         details["organizer_domain"] = organizer_domain
+    organization_type = organization_type_or_unknown(row["raw"].get("organization_type"))
     outcome, detail = _apply_saved(repository, "cvent", row, details, existing, account_id, organizer, domain,
-                                   _organization_type(organizer), promote)
+                                   organization_type, promote)
     if "date_review" in details and outcome != "review":
         detail += f" Event dates need review. {details['date_review']}"
     return outcome, detail
@@ -261,7 +254,7 @@ def evaluate_intake(repository: SourceRepository, source, payload, *, preview=Fa
         return "staged", " ".join(part for part in (action, contact_note) if part)
 
     if account_id is None:
-        kind = _cell(payload.get("organization_type"))[:60] or "Unknown"
+        kind = organization_type_or_unknown(payload.get("organization_type"))
         account_id = repository.create_account(name, domain, kind)
         if account_id is None:
             return "review", "An existing account identity conflicts with this source record."

@@ -2,6 +2,7 @@
 
 import json
 
+from account_facts_store import refresh_account_facts
 from crm_core.growth import DEFAULT_RULES, local_day
 from suppression_projection import refresh_account_suppression
 from workflow_store import (
@@ -115,12 +116,13 @@ class SqlGrowthStore:
             ON CONFLICT(account_id) DO UPDATE SET score = excluded.score,
                 signals = excluded.signals, observed_at = excluded.observed_at
         """, (account_id, score, json.dumps(signals), timestamp(observed)))
+        refresh_account_facts(self.connection, (account_id,))
 
-    def fit_work_state(self, account_id):
+    def work_state(self, account_id):
         return self.connection.execute("SELECT owner_id, stage, revision FROM account_work WHERE account_id = ?",
                                        (account_id,)).fetchone()
 
-    def apply_fit_stage(self, account_id, stage, expected_revision):
+    def apply_stage(self, account_id, stage, expected_revision):
         self.connection.execute("""
             INSERT INTO account_work(account_id, stage, revision) VALUES (?, ?, 1)
             ON CONFLICT(account_id) DO UPDATE SET stage = excluded.stage, revision = account_work.revision + 1

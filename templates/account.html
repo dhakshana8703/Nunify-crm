@@ -20,7 +20,9 @@
         <div><dt>Account owner</dt><dd>{% if work is defined %}{{ work.owner_name or 'Unassigned' }}{% else %}{{ account.owner|default('Unassigned', true) }}{% endif %}</dd></div>
         <div><dt>Event platform</dt><dd>{{ profile.platform }}{% if profile.platform_confidence %} <small>({{ profile.platform_confidence }})</small>{% endif %}</dd></div>
         {% if profile.country %}<div><dt>Organization country</dt><dd>{{ profile.country }}</dd></div>{% endif %}
-        {% if profile.members %}<div><dt>Directory members</dt><dd>{{ profile.members }}</dd></div>{% endif %}
+        {% if profile.region %}<div><dt>Sales region</dt><dd>{{ profile.region }}</dd></div>{% endif %}
+        {% if profile.members is not none %}<div><dt>Directory members</dt><dd>{{ profile.members }}</dd></div>{% endif %}
+        {% if profile.events_per_year is not none %}<div><dt>Events recorded in the past 12 months</dt><dd>{{ profile.events_per_year }}</dd></div>{% endif %}
         {% if profile.fit_score is not none %}<div><dt>Fit score</dt><dd>{{ profile.fit_score }}</dd></div>{% endif %}
       </dl>
       {% if current_user.role == 'admin' %}

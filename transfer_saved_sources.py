@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from werkzeug.security import check_password_hash
 
+from account_facts_store import refresh_account_facts
 from crm_core.transfer import transfer_snapshot
 from crm_store import connect, is_postgres
 from transfer_store import SqlSnapshotTransfer, read_snapshot, transfer_transaction
@@ -41,7 +42,12 @@ def transfer_saved_sources(source_path, destination, *, apply=False, admin=None,
         store = SqlSnapshotTransfer(connection)
         with transfer_transaction(connection, apply=apply, postgres=postgres, require_apply_ready=require_apply_ready):
             actor_id = _admin_id(store, admin) if apply and admin else None
-            return transfer_snapshot(store, *snapshot, apply=apply, actor_id=actor_id)
+            counts = transfer_snapshot(store, *snapshot, apply=apply, actor_id=actor_id)
+            if apply and any(counts.get(key, 0) for key in (
+                "accounts_added", "source_records_added", "qualifications_added", "company_evidence_added",
+            )):
+                refresh_account_facts(connection)
+            return counts
 
 
 def main():

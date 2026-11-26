@@ -201,33 +201,35 @@ The local acceptance checks and the 50-test PostgreSQL fixture rehearsal on the 
 
 ##### R1-06 Account type, platform, timing and stage fields [migration]
 
-- [ ] `accounts` gains: `type` (corporate / association / agency / organizer / university / government / other / unknown), `platform` (cvent / other_detected / none / unknown), `platform_detail` (text, e.g. "Swoogo"), `platform_confidence`, `next_event_date`, `events_per_year`, `members`, `fit_score`, `stage`, `owner_id`, `country`, `region` (India / US / Europe / Middle East / Other)
+[Active acceptance spec and data decisions](r1-06-account-fields.md)
 
-  **Partial.** Type, platform evidence, next event, members, fit, stage, owner and country are available through account facts and workflow tables. Events per year and region are incomplete. (Original line 74.)
+- [x] `accounts` gains: `type` (corporate / association / agency / organizer / university / government / other / unknown), `platform` (cvent / other_detected / none / unknown), `platform_detail` (text, e.g. "Swoogo"), `platform_confidence`, `next_event_date`, `events_per_year`, `members`, `fit_score`, `stage`, `owner_id`, `country`, `region` (India / US / Europe / Middle East / Other)
 
-- [ ] `stage` values per architecture doc section 4.2 (Discovered ... Nurture), default Discovered
+  **Verified locally.** New derived facts are persisted. The account screen and filters use the existing organization type, assignment, stage and qualification score records. (Original line 74.)
 
-  **Partial.** Discovered is the default and core sale stages work. The entire original stage lifecycle has no end-to-end verification. (Original line 75.)
+- [x] `stage` values per architecture doc section 4.2 (Discovered ... Nurture), default Discovered
+
+  **Verified locally.** New stage values are validated, with Discovered as the default. Discovery advances eligible accounts to Enriched while existing later stages, owner changes and merged historical stages survive. Live HubSpot delivery stays under R3. (Original line 75.)
 
 - [ ] `owner_id` populated from the existing Team allocations; allocations UI writes to `owner_id` from now on
 
-  **Partial.** The new Assignments UI writes permissions and owners. Historical standalone Cvent team allocations are still pending reconciliation. (Original line 76.)
+  **Fixtures passed.** Assignments and the audited Cvent import share the ownership workflow. Previewing the 50 setup rows without an approved mapping found zero ready assignments. Applying verified legacy ownership remains pending. (Original line 76.)
 
-- [ ] `next_event_date` computed as the earliest event with start date >= today, recomputed nightly and on event insert
+- [x] `next_event_date` computed as the earliest event with start date >= today, recomputed nightly and on event insert
 
-  **Partial.** The earliest valid upcoming event is calculated at read time. Dedicated nightly and insert-time persisted refreshes are missing. (Original line 77.)
+  **Verified locally.** The saved date refreshes with accepted event evidence and on the worker's first pass of the new business day. Replay, rollback, merge and midnight regressions pass. (Original line 77.)
 
 - [x] All Cvent-sourced accounts set to `platform = cvent`, `platform_confidence = confirmed`
 
-  **Verified locally.** The account profile presents Cvent with confirmed event evidence whenever a saved Cvent record is linked. See tests/test_account_profile.py. (Original line 78.)
+  **Verified locally.** The saved data rehearsal confirmed all 52 accounts tied to approved Cvent evidence, including 20 with company roster evidence and zero linked Cvent events. (Original line 78.)
 
-- [ ] `type` defaults to `unknown`; populated later by the rule-based classifier in Release 1b (R1-07). Admin can set it manually in the meantime
+- [x] `type` defaults to `unknown`; populated later by the rule-based classifier in Release 1b (R1-07). Admin can set it manually in the meantime
 
-  **Partial.** Admin can set a supported type and edits are audited. Cvent and Directory creation infer types, and the full classifier is open. (Original line 79.)
+  **Verified locally.** New accounts with no supported explicit type default to Unknown. A verified Directory listing supplies Association. Admins can change the type with a recorded audit, and replay preserves the saved choice. (Original line 79.)
 
 - [x] Columns Owner, Stage and Next event added to the existing Companies list, with filters for Owner (incl. Unassigned) and Stage
 
-  **Verified locally.** Assignments shows owner, stage and next event with owner and stage filters. See tests/test_bulk_assignment.py and the live filter check in working.md. (Original line 80.)
+  **Verified locally.** Assignments shows owner, stage and next event with owner and stage filters. Scoped account access and current follow-up behavior passed the regression checks. (Original line 80.)
 
 ##### R1-08 Single credit ledger [migration]
 

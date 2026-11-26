@@ -8,7 +8,9 @@ from zoneinfo import ZoneInfo
 from werkzeug.security import generate_password_hash
 
 from crm_core.access import account_relation as relation_for_account
+from crm_core.account_facts import verified_event_date
 from crm_core.contacts import normalized_linkedin_profile
+from crm_core.growth import ACCOUNT_STAGES
 from crm_core.suppression import matching_rule
 from crm_core.suppression_metadata import REASON_CODES, legacy_reason_metadata, rule_reason_text
 from organization_identity import matches_domain
@@ -208,9 +210,45 @@ def _migrate_suppression_metadata(connection):
     return True
 
 
+def _install_account_stage_guards(connection):
+    installed = connection.execute("""
+        INSERT OR IGNORE INTO workflow_settings(key, value) VALUES ('account_stage_guards_v1', '1')
+    """)
+    if not installed.rowcount:
+        return
+    stages = ", ".join(f"'{stage}'" for stage in ACCOUNT_STAGES)
+    # Allow an existing legacy stage to follow its work record through a merge or reassignment.
+    recognized = f"""NEW.stage IN ({stages})
+        OR EXISTS (SELECT 1 FROM account_work WHERE stage = NEW.stage)"""
+    if getattr(connection, "dialect", "sqlite") == "postgresql":
+        connection.execute(f"""
+            CREATE OR REPLACE FUNCTION check_account_work_stage() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NOT ({recognized}) THEN
+                    RAISE EXCEPTION 'Unsupported account stage' USING ERRCODE = '23514';
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+        """)
+        connection.execute("""
+            CREATE TRIGGER account_work_stage_guard
+            BEFORE INSERT OR UPDATE OF stage ON account_work
+            FOR EACH ROW EXECUTE FUNCTION check_account_work_stage()
+        """)
+    else:
+        for name, event in (("insert", "INSERT"), ("update", "UPDATE OF stage")):
+            connection.execute(f"""
+                CREATE TRIGGER account_work_stage_guard_{name} BEFORE {event} ON account_work
+                WHEN NOT ({recognized})
+                BEGIN SELECT RAISE(ABORT, 'Unsupported account stage'); END
+            """)
+
+
 def initialize(connection):
     connection.executescript(SCHEMA)
     with transaction(connection):
+        _install_account_stage_guards(connection)
         if not connection.execute("PRAGMA table_info(account_merges)").fetchone():
             initialize_account_identity(connection)
         columns_to_add = {
@@ -270,9 +308,23 @@ def seed_demo_users(connection):
 
 def account_rows(connection, today, account_id=None):
     if account_id is None:
-        return [dict(row) for row in connection.execute(ACCOUNT_QUERY + " ORDER BY a.id", (today,))]
+        rows = connection.execute(ACCOUNT_QUERY + " ORDER BY a.id", (today,))
+        return [_account_for_day(connection, row, today) for row in rows]
     row = connection.execute(ACCOUNT_QUERY + " AND a.id = ?", (today, account_id)).fetchone()
-    return dict(row) if row else None
+    return _account_for_day(connection, row, today) if row else None
+
+
+def _account_for_day(connection, row, today):
+    account = dict(row)
+    if account.get("facts_as_of") == str(today):
+        account["next_event"] = account["next_event_date"]
+    elif account["next_event"] is not None and verified_event_date(account["next_event"]) is None:
+        dates = connection.execute("""
+            SELECT start_date_iso FROM cvent_read
+            WHERE company_id = ? AND start_date_iso >= ? ORDER BY start_date_iso
+        """, (account["id"], today))
+        account["next_event"] = next((item[0] for item in dates if verified_event_date(item[0])), None)
+    return account
 
 
 def active_coverage(connection, account, now=None):

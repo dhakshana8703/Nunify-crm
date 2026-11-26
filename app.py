@@ -20,6 +20,7 @@ import source_ops
 import source_review
 import workflow_store
 import workflow_web
+from account_facts_store import initialize_account_facts
 from crm_store import (
     configured_database, connect, directory_listings, has_accounts, initialize, record_evidence, unlinked_source_count,
 )
@@ -54,6 +55,7 @@ def create_app(database_path=None, *, demo=False):
         scraper_ingest.initialize(connection)
         growth_ops.initialize(connection)
         campaigns.initialize(connection)
+        initialize_account_facts(connection)
         if demo:
             workflow_store.seed_demo_users(connection)
     app.register_blueprint(workflow_web.bp)

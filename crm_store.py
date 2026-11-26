@@ -6,9 +6,11 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from account_facts_store import refresh_account_facts
 from account_identity_schema import initialize_account_identity
 from account_redirects import account_identity_rows
 from crm_core.account_identity import corroborated_account
+from crm_core.account_profile import organization_type_or_unknown
 from organization_identity import root_domain
 from suppression_projection import account_projection_available, refresh_account_suppression
 
@@ -33,7 +35,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     identity_key TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     domain TEXT NOT NULL,
-    organization_type TEXT NOT NULL,
+    organization_type TEXT NOT NULL DEFAULT 'Unknown',
     owner TEXT
 );
 
@@ -187,6 +189,7 @@ class SqlSeedSnapshot:
     def __init__(self, connection):
         self.connection = connection
         self.created_accounts = []
+        self.changed_accounts = set()
         self.requested_account_ids = {}
 
     def ensure_account(self, identity, account):
@@ -208,7 +211,8 @@ class SqlSeedSnapshot:
         result = self.connection.execute("""
             INSERT INTO accounts (identity_key, name, domain, organization_type, root_domain)
             VALUES (?, ?, ?, ?, ?)
-        """, (identity, account["name"], account["domain"], account["organization_type"], root))
+        """, (identity, account["name"], account["domain"],
+              organization_type_or_unknown(account.get("organization_type")), root))
         self.created_accounts.append(result.lastrowid)
 
     def account_ids(self):
@@ -239,6 +243,8 @@ class SqlSeedSnapshot:
         """, (record["source"], record["source_id"], record["source_url"], record["source_file"], account_id,
               record["reason"], json.dumps(record["details"], sort_keys=True, ensure_ascii=False),
               json.dumps(record["raw"], sort_keys=True, ensure_ascii=False)))
+        if result.rowcount and account_id is not None:
+            self.changed_accounts.add(account_id)
         return result.rowcount
 
 
@@ -253,6 +259,8 @@ def import_snapshot(database_path, accounts, records):
         changes = seed_snapshot(store, accounts, records)
         if store.created_accounts and account_projection_available(connection):
             refresh_account_suppression(connection, store.created_accounts)
+        if store.changed_accounts or store.created_accounts:
+            refresh_account_facts(connection, store.changed_accounts.union(store.created_accounts))
 
         counts = connection.execute("""
             SELECT COUNT(*) AS source_records,
