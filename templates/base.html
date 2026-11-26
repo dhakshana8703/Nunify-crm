@@ -22,7 +22,7 @@
           <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.my_accounts' %} is-current{% endif %}" href="{{ url_for('workflow.my_accounts') }}"{% if request.endpoint == 'workflow.my_accounts' %} aria-current="page"{% endif %}>My Accounts</a>
         {% elif current_user and current_user.role in ('manager', 'admin') %}
           <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.assignment' %} is-current{% endif %}" href="{{ url_for('workflow.assignment') }}"{% if request.endpoint == 'workflow.assignment' %} aria-current="page"{% endif %}>Assignments</a>
-          <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.today' %} is-current{% endif %}" href="{{ url_for('workflow.today') }}"{% if request.endpoint == 'workflow.today' %} aria-current="page"{% endif %}>Team queue</a>
+          <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.today' %} is-current{% endif %}" href="{{ url_for('workflow.today', bucket='all_open') }}"{% if request.endpoint == 'workflow.today' %} aria-current="page"{% endif %}>Team queue</a>
           <a class="nav-link workflow-nav{% if request.blueprint == 'source_review' %} is-current{% endif %}" href="{{ url_for('source_review.index') }}"{% if request.blueprint == 'source_review' %} aria-current="page"{% endif %}>Source review</a>
           <a class="nav-link workflow-nav{% if request.blueprint == 'account_names' %} is-current{% endif %}" href="{{ url_for('account_names.index') }}">Account name review</a>
           {% if 'account_merges.index' in view_endpoints|default([]) %}

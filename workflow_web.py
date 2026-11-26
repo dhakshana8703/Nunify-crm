@@ -19,7 +19,7 @@ from assignment_store import SqlAssignmentStore
 from crm_core.activity import (
     ActivityConflict, ActivitySubmission, InvalidActivity, OutreachBlocked, activity_direction, record_activity,
 )
-from crm_core.agenda import queue_items
+from crm_core.agenda import open_followups, queue_items
 from crm_core.assignment import (
     AllocationDenied, AssignmentBlocked, InvalidAssignment, StaleAssignment, apply_round_robin, assign_account,
     assign_selected, assignment_rows, bulk_selection, pool_accounts, require_active_owner, require_preview_owner,
@@ -229,29 +229,48 @@ def logout():
     return redirect(url_for("workflow.login"), code=303)
 
 
+def _queue_sdr_id(options, value):
+    if not value:
+        return None
+    for option in options:
+        if str(option["id"]) == value:
+            return option["id"]
+    abort(400, "Choose an SDR from the Team queue filter.")
+
+
 @bp.get("/today")
 def today():
     with _work_request():
         require_sales_queue(g.crm_user)
     bucket = request.args.get("bucket", "today")
-    if bucket not in {"today", "tomorrow"}:
+    if bucket == "all_open":
+        staff_required()
+    elif bucket not in {"today", "tomorrow"}:
         bucket = "today"
     day = user_day()
     queue_day = day + timedelta(days=1) if bucket == "tomorrow" else day
     accounts = readable_accounts()
-    rows = queue_items(SqlWorkStore(db()), accounts, bucket, day, g.crm_user["timezone"], now(),
-                       current_app.config["PLANNING_MONTHS_MIN"], current_app.config["PLANNING_MONTHS_MAX"])
+    store = SqlWorkStore(db())
+    sdr_options, selected_sdr = (), None
+    if bucket == "all_open":
+        sdr_options = store.sdr_queue_options()
+        selected_sdr = _queue_sdr_id(sdr_options, request.args.get("sdr"))
+        rows = open_followups(store, accounts, selected_sdr, g.crm_user["timezone"], now())
+    else:
+        rows = queue_items(store, accounts, bucket, day, g.crm_user["timezone"], now(),
+                           current_app.config["PLANNING_MONTHS_MIN"], current_app.config["PLANNING_MONTHS_MAX"])
     for row in rows:
         if row["reply_id"] is not None:
             outcome = label(row["outcome"])
             row["title"] = f"{outcome} from {row['contact_name']}" if row["contact_name"] else outcome
-    context = list_params(rows, lambda row: f"{row['title']} {row['account_name']} {row['reason']}", {
+    context = list_params(rows, lambda row: f"{row['title']} {row['account_name']} {row['reason']} {row.get('owner_name', '')}", {
         "priority": lambda row: (row["priority"], row["due_on"] or "", row["account_name"]),
         "account": lambda row: (row["account_name"].casefold(), row["priority"]),
         "due": lambda row: (row["due_on"] or "9999", row["priority"]),
     }, "priority")
-    return render_template("today.html", **context, local_day=day.isoformat(),
-                           queue_day=queue_day.isoformat(), bucket=bucket, has_work_accounts=bool(accounts))
+    return render_template("today.html", **context, local_day=day.isoformat(), queue_day=queue_day.isoformat(),
+                           bucket=bucket, has_work_accounts=bool(accounts),
+                           sdr_options=sdr_options, selected_sdr=selected_sdr)
 
 
 @bp.get("/my-accounts")
@@ -573,11 +592,18 @@ def update_task(task_id):
     action = request.form.get("action")
     connection = db()
     store = SqlWorkStore(connection)
+    return_to = {}
+    if request.form.get("bucket") == "all_open":
+        staff_required()
+        return_to["bucket"] = "all_open"
+        selected_sdr = _queue_sdr_id(store.sdr_queue_options(), request.form.get("sdr"))
+        if selected_sdr is not None:
+            return_to["sdr"] = selected_sdr
     with _work_request(), transaction(connection):
         task = find_task(store, task_id)
         account = account_required(task["account_id"], write=True)
         update_task_rule(store, task, account, action, request.form.get("due_on"), g.crm_user["timezone"], now())
-    return redirect(url_for("workflow.today"), code=303)
+    return redirect(url_for("workflow.today", **return_to), code=303)
 
 
 @bp.post("/replies/<int:activity_id>/acknowledge")

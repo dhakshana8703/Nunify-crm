@@ -94,6 +94,21 @@ class SqlWorkStore:
             SELECT * FROM tasks WHERE account_id = ? AND status IN ('open', 'snoozed') AND due_on <= ?
         """, (account_id, cutoff.isoformat())).fetchall()
 
+    def open_tasks(self, owner_id):
+        owner_filter = " AND t.owner_id = ?" if owner_id is not None else ""
+        parameters = (owner_id,) if owner_id is not None else ()
+        return self.connection.execute(f"""
+            SELECT t.id, t.account_id, t.person_id, t.title, t.due_on, t.status, u.name AS owner_name
+            FROM tasks t JOIN users u ON u.id = t.owner_id
+            WHERE u.role = 'sdr' AND t.status IN ('open', 'snoozed'){owner_filter}
+            ORDER BY t.due_on, t.id
+        """, parameters).fetchall()
+
+    def sdr_queue_options(self):
+        return self.connection.execute("""
+            SELECT id, name, active FROM users WHERE role = 'sdr' ORDER BY name COLLATE NOCASE, id
+        """).fetchall()
+
     def coverage_for(self, account, current_time):
         return active_coverage(self.connection, account, current_time)
 

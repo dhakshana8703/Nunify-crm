@@ -11,6 +11,8 @@ from crm_core.tasks import account_date
 class AgendaStore(Protocol):
     def due_tasks(self, account_id, cutoff): ...
 
+    def open_tasks(self, owner_id): ...
+
     def coverage_for(self, account, current_time): ...
 
     def restriction_for(self, account_id, person_id=None): ...
@@ -18,6 +20,31 @@ class AgendaStore(Protocol):
     def pending_replies(self, account_id, outcomes): ...
 
     def activity_since(self, account_id, assigned_at): ...
+
+
+def open_followups(store: AgendaStore, accounts, owner_id, actor_timezone, current_time):
+    accounts_by_id = {account["id"]: account for account in accounts}
+    rows = []
+    for task in store.open_tasks(owner_id):
+        account = accounts_by_id.get(task["account_id"])
+        if account is None or store.restriction_for(task["account_id"], task["person_id"]):
+            continue
+        local_day = account_date(account, actor_timezone, current_time).isoformat()
+        overdue = task["due_on"] < local_day
+        rows.append({
+            "account_id": account["id"],
+            "account_name": account["name"],
+            "task_id": task["id"],
+            "reply_id": None,
+            "title": task["title"],
+            "due_on": task["due_on"],
+            "owner_name": task["owner_name"],
+            "status": task["status"],
+            "local_day": local_day,
+            "priority": 1 if overdue else 2,
+            "reason": "Overdue" if overdue else "Follow-up",
+        })
+    return rows
 
 
 def _offset_months(day, count):
