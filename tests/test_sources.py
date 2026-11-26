@@ -11,10 +11,11 @@ from zipfile import ZipFile
 
 from openpyxl import Workbook
 
-import directory_import
+import source_ops
 from app import create_app
 from crm_store import connect, import_snapshot
-from import_demo import ACCOUNTS, SOURCE_PARENT, load_cvent_records
+from import_demo import ACCOUNTS, load_cvent_records
+from source_fixtures import write_cvent_fixture
 from source_ops import _new_run, work_one
 from workflow_store import DEMO_PASSWORD
 
@@ -65,7 +66,8 @@ class SourcesTest(unittest.TestCase):
         return response.location
 
     def test_legacy_saved_run_never_promotes_demo_records(self):
-        selected_event = load_cvent_records(SOURCE_PARENT / "cvent-scrapper")[0]
+        write_cvent_fixture(self.directory)
+        selected_event = load_cvent_records(self.directory)[0]
         with closing(connect(self.database)) as connection, connection:
             run_id = _new_run(connection, "cvent", "Legacy saved run", "manual", rows=[(1, selected_event)])
         self.assertEqual(self._run(), run_id)
@@ -106,7 +108,8 @@ class SourcesTest(unittest.TestCase):
         })
         self.assertEqual(note.status_code, 303)
 
-        saved_event = load_cvent_records(SOURCE_PARENT / "cvent-scrapper")[0]
+        write_cvent_fixture(self.directory)
+        saved_event = load_cvent_records(self.directory)[0]
         self.assertEqual(import_snapshot(self.database, ACCOUNTS, [saved_event])["changed_records"], 1)
         self.assertEqual(import_snapshot(self.database, ACCOUNTS, [saved_event])["changed_records"], 0)
 
@@ -134,6 +137,33 @@ class SourcesTest(unittest.TestCase):
                 SELECT account_id, json_extract(payload_json, '$.name') FROM imported_source_evidence WHERE external_id = 'aarp-1'
             """).fetchone()
             self.assertEqual(tuple(original), (aarp, "AARP National"))
+
+    def test_csv_contact_checks_mixed_case_active_suppression(self):
+        with closing(connect(self.database)) as connection, connection:
+            rule_id = connection.execute("""
+                INSERT INTO suppression (kind, value, reason, reason_note, created_at)
+                VALUES ('email', 'Planner@EXAMPLE.TEST', 'manual', 'Existing restriction', '2026-11-20T00:00:00+00:00')
+            """).lastrowid
+
+        def upload(source_id):
+            return self._preview("contacts.csv", io.BytesIO((
+                "source_id,name,domain,contact_name,contact_email\n"
+                f"{source_id},AARP,aarp.org,Test Planner,planner@example.test\n"
+            ).encode()))
+
+        blocked_path = upload("blocked-contact")
+        self.assertIn(b"The contact matches an outreach restriction.", self.admin.get(blocked_path).data)
+        self.assertEqual(self._post(blocked_path + "/queue").status_code, 303)
+        self.assertEqual(self._run(), 1)
+        with closing(connect(self.database)) as connection:
+            self.assertIsNone(connection.execute("SELECT id FROM people WHERE email = 'planner@example.test'").fetchone())
+
+        self.assertEqual(self._post(f"/suppression/{rule_id}/remove").status_code, 303)
+        active_path = upload("available-contact")
+        self.assertEqual(self._post(active_path + "/queue").status_code, 303)
+        self.assertEqual(self._run(), 2)
+        with closing(connect(self.database)) as connection:
+            self.assertIsNotNone(connection.execute("SELECT id FROM people WHERE email = 'planner@example.test'").fetchone())
 
     def test_external_key_scope_overlap_retry_and_revocation(self):
         manager = self.app.test_client()
@@ -192,14 +222,15 @@ class SourcesTest(unittest.TestCase):
         self.assertNotIn(b"data-source-run-status", failure.data)
         self.assertEqual(self.admin.get(status_path).json, {"state": "failed", "attempts": 1})
         self.assertEqual(self._post(queued.location + "/queue").status_code, 303)
-        self.assertEqual(self._run(cvent_dir=SOURCE_PARENT / "cvent-scrapper"), 1)
+        saved_export = write_cvent_fixture(self.directory)
+        self.assertEqual(self._run(cvent_dir=self.directory), 1)
         recovered = self.admin.get(queued.location)
         self.assertIn(b"Promote eligible events", recovered.data)
         self.assertIn(b"2 worker attempts", recovered.data)
         self.assertNotIn(b"data-source-run-status", recovered.data)
         self.assertEqual(self.admin.get(status_path).json, {"state": "ready", "attempts": 2})
         with closing(connect(self.database)) as connection:
-            expected = json.loads((SOURCE_PARENT / "cvent-scrapper" / "master_cvent_events.json").read_text(encoding="utf-8-sig"))
+            expected = json.loads(saved_export.read_text(encoding="utf-8"))
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_run_rows WHERE run_id = 1").fetchone()[0], len(expected))
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_records").fetchone()[0], 0)
 
@@ -229,14 +260,14 @@ class SourcesTest(unittest.TestCase):
         queued = self._post("/sources/directory/export", min_members="2000")
         self.assertEqual(queued.status_code, 303)
         self.assertEqual(self._post("/sources/directory/export").location, queued.location)
-        evaluate = directory_import.evaluate
+        evaluate = source_ops.evaluate_saved
 
-        def interrupted(connection, row, policy, *, promote=False):
+        def interrupted(repository, source, row, policy, *, promote=False):
             if row["source_id"] == "10000000-0000-4000-8000-000000000003":
                 raise RuntimeError("Simulated worker interruption")
-            return evaluate(connection, row, policy, promote=promote)
+            return evaluate(repository, source, row, policy, promote=promote)
 
-        with patch("source_ops.SAVED_EXPORT_BATCH_SIZE", 2), patch("directory_import.evaluate", interrupted):
+        with patch("source_ops.SAVED_EXPORT_BATCH_SIZE", 2), patch("source_ops.evaluate_saved", interrupted):
             self.assertEqual(self._run(directory_dir=self.directory), 1)
         self.assertIn(b"Retry run", self.admin.get(queued.location).data)
         with closing(connect(self.database)) as connection:

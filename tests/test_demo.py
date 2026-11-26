@@ -7,13 +7,11 @@ from uuid import uuid4
 
 from app import create_app
 from crm_store import connect, import_snapshot
-from directory_source import load_directory_records
-from import_demo import ACCOUNTS, AARP_EVENTS, CVENT_EXPORT, SOURCE_PARENT, import_demo, load_cvent_records
+from import_demo import ACCOUNTS, AARP_EVENTS, CVENT_EXPORT, import_demo, load_cvent_records
+from source_fixtures import DEMO_EVENT_NAME, DEMO_MEMBERS, write_demo_fixtures
 from workflow_store import DEMO_PASSWORD
 
 
-CVENT_DIR = SOURCE_PARENT / "cvent-scrapper"
-DIRECTORY_DIR = SOURCE_PARENT / "association"
 PARENT_LISTING = "20BF96A7-8948-42A9-806C-C8880869AE3E"
 STAGED_LISTINGS = {
     "3A137753-0474-45FB-B646-BE89EEC1D64A",  # Caregiving program
@@ -30,6 +28,7 @@ class TwoSourceDemoTest(unittest.TestCase):
         self.directory.mkdir(parents=True)
         self.addCleanup(self.remove_test_files)
         self.database = self.directory / "demo.sqlite3"
+        write_demo_fixtures(self.directory)
 
     def remove_test_files(self):
         for path in self.directory.iterdir():
@@ -43,9 +42,9 @@ class TwoSourceDemoTest(unittest.TestCase):
         return [dict(row) for row in accounts], [dict(row) for row in evidence]
 
     def test_replaying_the_saved_exports_preserves_all_ids_links_and_values(self):
-        first_result = import_demo(self.database, CVENT_DIR, DIRECTORY_DIR)
+        first_result = import_demo(self.database, self.directory, self.directory)
         first_state = self.saved_state()
-        second_result = import_demo(self.database, CVENT_DIR, DIRECTORY_DIR)
+        second_result = import_demo(self.database, self.directory, self.directory)
         self.assertEqual(self.saved_state(), first_state)
         self.assertEqual(first_result.pop("changed_records"), 9)
         self.assertEqual(second_result.pop("changed_records"), 0)
@@ -63,13 +62,9 @@ class TwoSourceDemoTest(unittest.TestCase):
 
     def test_refresh_changes_only_its_source_and_preserves_ownership(self):
         cvent_export = self.directory / CVENT_EXPORT
-        cvent_rows = [record["raw"] for record in load_cvent_records(CVENT_DIR)]
-        cvent_export.write_text(json.dumps(cvent_rows), encoding="utf-8")
-        directory_rows = {}
-        for record in load_directory_records(DIRECTORY_DIR):
-            directory_rows.setdefault(record["source_file"], []).append(record["raw"])
-        for filename, rows in directory_rows.items():
-            (self.directory / filename).write_text(json.dumps(rows), encoding="utf-8")
+        cvent_rows = json.loads(cvent_export.read_text(encoding="utf-8"))
+        directory_export = self.directory / "all_associations.json"
+        directory_rows = json.loads(directory_export.read_text(encoding="utf-8"))
 
         import_demo(self.database, self.directory, self.directory)
         with closing(connect(self.database)) as connection, connection:
@@ -77,12 +72,10 @@ class TwoSourceDemoTest(unittest.TestCase):
         original_accounts, original_records = self.saved_state()
         self.assertEqual(original_accounts[0]["owner"], "Demo SDR")
         aarp_listing = next(
-            row for row in directory_rows["all_associations.json"] if PARENT_LISTING in row["source_url"]
+            row for row in directory_rows if PARENT_LISTING in row["source_url"]
         )
         aarp_listing["member_count"] = "31,500,000"
-        (self.directory / "all_associations.json").write_text(
-            json.dumps(directory_rows["all_associations.json"]), encoding="utf-8",
-        )
+        directory_export.write_text(json.dumps(directory_rows), encoding="utf-8")
         update = import_demo(self.database, self.directory, self.directory)
         self.assertEqual(update["changed_records"], 1)
         accounts, records = self.saved_state()
@@ -109,9 +102,9 @@ class TwoSourceDemoTest(unittest.TestCase):
         self.assertEqual(json.loads(event["raw_json"])["venue_name"], "Updated source venue")
 
     def test_unapproved_relink_rolls_back_the_whole_batch(self):
-        import_demo(self.database, CVENT_DIR, DIRECTORY_DIR)
+        import_demo(self.database, self.directory, self.directory)
         before = self.saved_state()
-        events = load_cvent_records(CVENT_DIR)
+        events = load_cvent_records(self.directory)
         events[0]["details"]["event_name"] = "Updated source event"
         events[1]["identity_key"] = "ctaa"
         with self.assertRaisesRegex(ValueError, "Review required"):
@@ -119,7 +112,7 @@ class TwoSourceDemoTest(unittest.TestCase):
         self.assertEqual(self.saved_state(), before)
 
     def test_ui_and_legacy_read_routes_use_the_shared_account(self):
-        snapshot = import_demo(self.database, CVENT_DIR, DIRECTORY_DIR)
+        snapshot = import_demo(self.database, self.directory, self.directory)
         aarp, ctaa = snapshot["accounts"]
         client = create_app(self.database, demo=True).test_client()
         login = client.get("/login")
@@ -132,16 +125,16 @@ class TwoSourceDemoTest(unittest.TestCase):
         self.assertEqual(client.get("/").location, "/assignment")
         shared = client.get(f"/accounts/{aarp['id']}")
         self.assertEqual(shared.status_code, 200)
-        self.assertIn(b"AARP WY 2026 Volunteer Summit", shared.data)
+        self.assertIn(DEMO_EVENT_NAME.encode(), shared.data)
         self.assertIn(b"American Association of Retired Persons", shared.data)
-        self.assertIn(b"32,000,000", shared.data)
+        self.assertIn(DEMO_MEMBERS.encode(), shared.data)
         self.assertIn(PARENT_LISTING.encode(), shared.data)
         self.assertNotIn(b"National Retired Teachers Association", shared.data)
 
         directory_only = client.get(f"/accounts/{ctaa['id']}")
         self.assertEqual(directory_only.status_code, 200)
         self.assertIn(b"Canadian Technical Asphalt Association", directory_only.data)
-        self.assertNotIn(b"AARP WY 2026 Volunteer Summit", directory_only.data)
+        self.assertNotIn(DEMO_EVENT_NAME.encode(), directory_only.data)
         review = client.get("/review")
         self.assertEqual(review.status_code, 200)
         self.assertIn(b"National Retired Teachers Association", review.data)
@@ -152,7 +145,7 @@ class TwoSourceDemoTest(unittest.TestCase):
 
         listing = client.get(f"/api/directory/{PARENT_LISTING}").get_json()
         self.assertEqual(listing["account_id"], aarp["id"])
-        self.assertEqual(listing["raw"]["member_count"], "32,000,000")
+        self.assertEqual(listing["raw"]["member_count"], DEMO_MEMBERS)
         self.assertEqual(listing["details"]["city"], "Washington")
         events = client.get("/api/events?search=Volunteer+Summit&limit=1").get_json()
         self.assertEqual(events["total"], 1)

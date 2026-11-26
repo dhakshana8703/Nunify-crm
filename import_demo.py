@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 
 from crm_store import DEFAULT_DB, import_snapshot
-from cvent_import import CVENT_FIELDS, FILE_NAME as CVENT_EXPORT
 from cvent_reads import parse_date_to_iso
 from directory_source import load_directory_records
+from source_identity import CVENT_EXPORT, CVENT_FIELDS
 
 
 WORKSPACE = Path(__file__).resolve().parent

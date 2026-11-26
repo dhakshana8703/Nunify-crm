@@ -2,7 +2,15 @@
 {% from 'workflow_ui.html' import page_links with context %}
 {% block title %}Operations | Nunify CRM{% endblock %}
 {% block content %}
-  <header class="page-header"><h1>Operations</h1><p>{{ credits }} demo enrichment credits recorded</p></header>
+  <header class="page-header">
+    <h1>Operations</h1>
+    <p>{{ credits }} demo enrichment credits recorded</p>
+    {% if last_worker_pass %}
+      <p>Last completed worker pass <time datetime="{{ last_worker_pass }}">{{ last_worker_pass[:16]|replace('T', ' ') }} UTC</time></p>
+    {% else %}
+      <p>No worker pass recorded.</p>
+    {% endif %}
+  </header>
   <section class="source-panel workflow-panel">
     <header class="panel-header"><h2>Account coverage</h2></header>
     <div class="workflow-panel-body">

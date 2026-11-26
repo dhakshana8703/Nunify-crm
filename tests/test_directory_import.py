@@ -97,11 +97,13 @@ class DirectoryImportTest(unittest.TestCase):
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM source_records").fetchone()[0], 1)
 
     def test_existing_demo_selection_obeys_policy_on_fresh_saved_import(self):
-        source_dir = Path(__file__).resolve().parents[2] / "association"
         national_id = "20BF96A7-8948-42A9-806C-C8880869AE3E"
         division_id = "74031B9D-44C3-4CCF-8123-CC77414C2220"
-        records = {row["source_id"]: row for row in load_rows(source_dir)
-                   if row["source_id"] in {national_id, division_id}}
+        records = {row["source_id"]: row for row in self._load([
+            listing("American Association of Retired Persons", "aarp.org", key=national_id, category="Retirement"),
+            listing("National Retired Teachers Association, Division of AARP", "aarp.org",
+                    key=division_id, category="Retirement"),
+        ])}
         national = records[national_id]
         self.assertEqual(national["raw"]["name"], "American Association of Retired Persons")
         self.assertEqual(national["details"]["category"], "Retirement")

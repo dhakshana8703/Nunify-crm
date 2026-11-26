@@ -7,6 +7,14 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 import test_admin_sdr_flow
+import test_r101_domain
+import test_r101_metadata
+import test_r101_projection
+import test_r102_ingest
+import test_r102_merge
+import test_r102_merge_ui
+import test_r102_schema
+import test_suppression_foundation
 from app import create_app
 from crm_store import is_postgres
 
@@ -14,8 +22,7 @@ from crm_store import is_postgres
 TEST_URL = os.environ.get("CRM_TEST_POSTGRES_URL")
 
 
-@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
-class PostgresPilotTest(test_admin_sdr_flow.AdminSDRFlowTest):
+class PostgresDatabase:
     def database_target(self):
         import psycopg2
         from psycopg2 import sql
@@ -40,6 +47,49 @@ class PostgresPilotTest(test_admin_sdr_flow.AdminSDRFlowTest):
         with closing(psycopg2.connect(TEST_URL)) as conn, conn, conn.cursor() as cursor:
             cursor.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
+
+@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
+class PostgresCompanyDomainSuppressionTest(PostgresDatabase, test_r101_domain.CompanyDomainSuppressionTest):
+    pass
+
+
+@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
+class PostgresSuppressionMetadataTest(PostgresDatabase, test_r101_metadata.SuppressionMetadataTest):
+    pass
+
+
+@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
+class PostgresSuppressionProjectionTest(PostgresDatabase, test_r101_projection.SuppressionProjectionTest):
+    pass
+
+
+@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
+class PostgresSuppressionWorkflowTest(PostgresDatabase, test_suppression_foundation.SuppressionFoundationTest):
+    pass
+
+
+@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
+class PostgresRootDomainSchemaTest(PostgresDatabase, test_r102_schema.RootDomainSchemaTest):
+    pass
+
+
+@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
+class PostgresRootDomainIngestTest(PostgresDatabase, test_r102_ingest.RootDomainIngestTest):
+    pass
+
+
+@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
+class PostgresAccountMergeTest(PostgresDatabase, test_r102_merge.AccountMergeTest):
+    pass
+
+
+@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
+class PostgresAccountMergeUiTest(PostgresDatabase, test_r102_merge_ui.AccountMergeUiTest):
+    pass
+
+
+@unittest.skipUnless(TEST_URL, "Set CRM_TEST_POSTGRES_URL to run the PostgreSQL rehearsal.")
+class PostgresPilotTest(PostgresDatabase, test_admin_sdr_flow.AdminSDRFlowTest):
     def check_integrity(self, db):
         constraints = db.execute("""
             SELECT c.convalidated

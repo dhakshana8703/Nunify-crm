@@ -150,6 +150,8 @@ class ContactWorkflowTest(unittest.TestCase):
                                   expected_status="do_not_contact").status_code, 403)
         with closing(connect(self.database, read_only=True)) as connection:
             saved = connection.execute("SELECT email, unlocked, email_verified, do_not_contact FROM people WHERE id = ?", (target,)).fetchone()
-            rule = connection.execute("SELECT reason FROM suppression WHERE kind = 'email' AND value = 'event@example.test'").fetchone()
+            rule = connection.execute("""
+                SELECT reason, reason_note, source FROM suppression WHERE kind = 'email' AND value = 'event@example.test'
+            """).fetchone()
         self.assertEqual(tuple(saved), ("event@example.test", 1, 1, 1))
-        self.assertEqual(rule["reason"], "Marked do not contact")
+        self.assertEqual(tuple(rule), ("opt_out", "Marked do not contact", "outreach"))

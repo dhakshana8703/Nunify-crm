@@ -138,7 +138,7 @@ class SourceReviewTest(unittest.TestCase):
             self.assertEqual(source_review.replay_result(connection, "cvent", self.event)[0], "unchanged")
             self.assertIsNone(source_review.replay_result(connection, "cvent", dict(self.event, proof="New evidence")))
             connection.execute("""
-                INSERT INTO suppression(kind, value, reason, created_at) VALUES ('domain', 'north.example', 'Customer', ?)
+                INSERT INTO suppression(kind, value, reason, created_at) VALUES ('domain', 'north.example', 'customer', ?)
             """, (timestamp(),))
             self.assertEqual(source_review.replay_result(connection, "cvent", self.event)[0], "suppressed")
             connection.execute("DELETE FROM suppression WHERE kind = 'domain' AND value = 'north.example'")

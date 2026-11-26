@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% from 'workflow_ui.html' import csrf with context %}
+{% block title %}Merge accounts | Nunify CRM{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1>Merge accounts</h1>
+  <p>Choose two records for the same organization. The account with the lower ID stays.</p>
+</header>
+
+<section class="source-panel workflow-panel" aria-labelledby="merge-selection-heading">
+  <header class="panel-header"><h2 id="merge-selection-heading">Choose accounts</h2></header>
+  <form class="workflow-form workflow-panel-body" method="post" action="{{ url_for('account_merges.preview') }}">
+    {{ csrf() }}
+    <div class="workflow-form-grid">
+      {% for field, label in [('first_account_id', 'First account'), ('second_account_id', 'Second account')] %}
+        {% set selected = selected_ids[loop.index0] %}
+        <label>{{ label }}
+          <select name="{{ field }}" required>
+            <option value="">Choose an account</option>
+            {% for account in choices %}
+              <option value="{{ account.id }}"{% if account.id == selected %} selected{% endif %}>
+                {{ account.name }} - {{ account.domain or 'No domain' }} - #{{ account.id }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+      {% endfor %}
+    </div>
+    <div><button class="button" type="submit"{% if choices|length < 2 %} disabled{% endif %}>Preview merge</button></div>
+  </form>
+</section>
+
+{% if plan %}
+  <section class="source-panel workflow-panel" aria-labelledby="merge-preview-heading">
+    <header class="panel-header"><h2 id="merge-preview-heading">Merge preview</h2></header>
+    <div class="workflow-panel-body">
+      <dl class="assignment-details">
+        <div>
+          <dt>Account to keep</dt>
+          <dd><a class="text-link" href="{{ url_for('account_detail', account_id=plan.survivor.id) }}">{{ plan.survivor.name }}</a>
+            - {{ plan.survivor.domain or 'No domain' }} - #{{ plan.survivor.id }}</dd>
+        </div>
+        {% for duplicate in plan.duplicates %}
+          <div>
+            <dt>Account to merge</dt>
+            <dd><a class="text-link" href="{{ url_for('account_detail', account_id=duplicate.id) }}">{{ duplicate.name }}</a>
+              - {{ duplicate.domain or 'No domain' }} - #{{ duplicate.id }}</dd>
+          </div>
+        {% endfor %}
+      </dl>
+      <h3>Linked records affected</h3>
+      <ul class="workflow-list">
+        {% for kind, count in plan.counts.items() if count %}
+          <li>
+            <details>
+              <summary>{{ count_labels.get(kind, kind|replace('_', ' ')|capitalize) }} - {{ count }}</summary>
+              <p>Record IDs {{ plan.affected_records[kind]|join(', ') }}</p>
+            </details>
+          </li>
+        {% else %}
+          <li class="empty-state">No linked records to move.</li>
+        {% endfor %}
+      </ul>
+      {% if plan.conflicts %}
+        <h3>Resolve before merging</h3>
+        <ul>
+          {% for conflict in plan.conflicts %}<li>{{ conflict }}</li>{% endfor %}
+        </ul>
+      {% else %}
+        <form class="workflow-form" method="post" action="{{ url_for('account_merges.confirm') }}">
+          {{ csrf() }}
+          <input type="hidden" name="merge_preview" value="{{ token }}">
+          <div><button class="button button-primary" type="submit">Confirm merge</button></div>
+        </form>
+      {% endif %}
+    </div>
+  </section>
+{% endif %}
+{% endblock %}

@@ -10,15 +10,18 @@
     {% if account_naming.state == 'conflicting' %}
       <p>The linked records give different organization names. Compare the evidence before choosing.</p>
     {% endif %}
+    {% if account_naming.state == 'review_domain' %}
+      <p>The name suggested by the domain differs from this organization's full name. Review the evidence before changing it.</p>
+    {% endif %}
     {% if account_naming.candidates %}
-      <details{% if account_naming.state in ('different', 'conflicting') %} open{% endif %}>
+      <details{% if account_naming.state in ('different', 'conflicting', 'review_domain') %} open{% endif %}>
         <summary>Linked name evidence</summary>
         <div class="workflow-list">
           {% for candidate in account_naming.candidates %}
             <div class="workflow-row">
               <div>
                 <strong>{{ candidate.name }}</strong>
-                <p>{{ candidate.source_label }}
+                <p>{{ candidate.source_label }}{% if candidate.review_only %} &middot; Requires review{% endif %}
                   {% if candidate.url %}&middot; <a class="text-link" href="{{ candidate.url }}" target="_blank" rel="noopener noreferrer">Source record</a>{% endif %}
                 </p>
               </div>

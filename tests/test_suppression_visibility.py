@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app import create_app
 from crm_store import connect
+from suppression_projection import refresh_account_suppression
 from workflow_store import DEMO_PASSWORD
 
 
@@ -26,6 +27,7 @@ class SuppressionVisibilityTest(unittest.TestCase):
             self.held = self.add_account(connection, "Manually Held Account", "held.example")
             self.other = self.add_account(connection, "Other Rep Account", "other.example")
             self.available = self.add_account(connection, "Unassigned Organizer", "unassigned.example")
+            refresh_account_suppression(connection, (self.blocked,))
             self.riya = self.users["riya@example.test"]
             self.jordan = self.users["jordan@example.test"]
             connection.executemany("""
@@ -60,12 +62,12 @@ class SuppressionVisibilityTest(unittest.TestCase):
             """, (self.organizer, self.opted_out, self.riya)).lastrowid
         admin = self.sign_in("admin")
         token = self.csrf(admin.get("/suppression"))
-        for kind, value, reason in (
+        for kind, value, reason_note in (
             ("account", self.held, "Account opted out"),
             ("email", "held@organizer.example", "Address opted out"),
         ):
             self.assertEqual(admin.post("/suppression", data={
-                "csrf_token": token, "kind": kind, "value": value, "reason": reason,
+                "csrf_token": token, "kind": kind, "value": value, "reason": "opt_out", "reason_note": reason_note,
             }).status_code, 303)
 
     def remove_files(self):

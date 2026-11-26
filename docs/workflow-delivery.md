@@ -121,77 +121,83 @@ The contact management story **R2-08** is fully ticked (4/4).
 
 ##### R1-01 Suppression list [migration]
 
-- [ ] Table `suppression` (id, kind: domain / email / account, value, reason: competitor / customer / open_deal / opt_out / bounced / manual, source, created_by, created_at)
+- [x] Table `suppression` (id, kind: domain / email / account, value, reason: competitor / customer / open_deal / opt_out / bounced / manual, source, created_by, created_at)
 
-  **Partial.** Domain, email and account rules carry value, reason and audit metadata. Dedicated source and classified reason fields are missing. (Original line 19.)
+  **Verified locally.** SQLite and PostgreSQL store source and enforce the six reason codes. Repeat migration preserves rule IDs, historical notes and removals. See [R1-01.1 verification](r1-01-suppression.md). (Original line 19.)
 
 - [x] Seeded with: cvent.com, cventevents.com, cvent-production.com, and the Cvent subdomain pattern `*.cventevents.com`
 
-  **Verified locally.** All four Cvent rules were present on the suppression screen in a fresh local trial. (Original line 20.)
+  **Verified locally.** Both databases seed all four Cvent rules as competitors. Restarting respects a previously removed seed. (Original line 20.)
 
 - [x] Domain matching works on root domain and all subdomains
 
-  **Verified locally.** Local boundary checks passed for root and nested subdomains, including wildcard rules. (Original line 21.)
+  **Verified locally.** Root domains and nested subdomains match whole labels. A bare `national.alpfa.org` rule also holds ALPFA at `alpfa.org`. An unrelated organization's registration URL does not establish its identity. (Original line 21.)
 
 - [x] Apollo enrichment and email unlock refuse suppressed accounts / people with a clear message
 
-  **Verified locally.** Local queue, unlock and worker tests blocked suppressed accounts and people with clear outcomes before the provider call. See tests/test_suppression_visibility.py and tests/test_growth_ops.py. (Original line 22.)
+  **Verified locally with offline providers.** Enrichment, unlock and outreach refuse every linked contact on a held company, including contacts on other email domains. Individual email rules remain scoped to that address. Queued requests recheck suppression before the provider and before using the result. (Original line 22.)
 
-- [ ] Existing accounts matching suppression are flagged `suppressed = true` with `suppress_reason`; they are hidden from default views but visible with a "Show suppressed" filter
+- [x] Existing accounts matching suppression are flagged `suppressed = true` with `suppress_reason`; they are hidden from default views but visible with a "Show suppressed" filter
 
-  **Partial.** Default hiding, scoped Show suppressed and the reason work. Suppression is calculated from rules rather than stored on each account. (Original line 23.)
+  **Verified locally.** SQLite and PostgreSQL backfill the stored flag and reason. Rule changes and account imports keep them in sync. Managers and SDRs can use Show suppressed within their account scope. (Original line 23.)
 
 - [x] Admin screen: list, add, remove suppression entries (CSV bulk add supported)
 
-  **Verified locally.** Local admin forms passed list, single add, CSV bulk add and remove on a disposable trial. (Original line 24.)
+  **Verified locally.** Admin can list, add, bulk upload and remove rules. Invalid CSV batches leave no changes. Removal records the rule details and Admin actor while keeping rule history. (Original line 24.)
 
 ##### R1-02 Root-domain normalization and merge [migration]
 
-- [ ] Function to normalize any URL / email domain to root domain (handles www, subdomains, country TLDs like .co.uk, .org.au)
+[Written acceptance checks, baseline and changed files](r1-02-root-domain-merge.md)
 
-  **Partial.** URL and email paths normalize hosts and recognize related domains. Public-suffix-aware root normalization is missing. (Original line 38.)
+The local acceptance checks and the 50-test PostgreSQL fixture rehearsal on the designated `r1-02-rehearsal` Neon branch passed. The local saved-data copy held 769 accounts. The Neon branch's existing account count was one before and after its test run.
 
-- [ ] `accounts.root_domain` is unique
+- [x] Function to normalize any URL / email domain to root domain (handles www, subdomains, country TLDs like .co.uk, .org.au)
 
-  **Partial.** Current account identity is uniquely keyed and exact hosts were distinct in the saved-data audit. Root-domain uniqueness is absent. (Original line 39.)
+  **Verified locally.** The offline suffix snapshot handles multi-label suffixes, internationalized domains and shared hosting tenants. (Original line 38.)
 
-- [ ] One-time merge script: accounts sharing a root domain are merged into the oldest record; events, people, credits and allocations are re-pointed; merged-away IDs logged in `account_merges` (from_id, to_id, merged_at)
+- [x] `accounts.root_domain` is unique
 
-  **Partial.** Source promotion preserves existing links. Governed account and history merge is open, and Dhakshana's brief requires review of ambiguous shared domains. (Original line 40.)
+  **Verified locally.** SQLite and PostgreSQL backfill roots and enforce case-insensitive uniqueness after legacy duplicate groups are resolved. Parallel source admissions yielded one account. (Original line 39.)
 
-- [ ] Dry-run mode that outputs the list of proposed merges before executing
+- [x] One-time merge script: confirmed duplicates keep the lowest account ID in the database; events, people, credits and allocations follow the survivor; retired IDs are recorded in `account_merges` (from_id, to_id, merged_at)
 
-  **Open.** There is no existing-account merge preview. The Apollo import dry run only matches leads to accounts. (Original line 41.)
+  **Verified locally.** Both databases kept history and rolled back a forced late error. An attempted enrichment request still blocks retirement of its account after Retry requeues it. Dhakshana selected the lowest ID as the rule for all merges. (Original line 40.)
 
-- [ ] Known cases resolved: national.alpfa.org -> alpfa.org; medc.cventevents.com suppressed via R1-01
+- [x] Dry-run mode that outputs the list of proposed merges before executing
 
-  **Partial.** The Cvent registration-domain suppression path is verified. The exact ALPFA consolidation is open. (Original line 42.)
+  **Verified locally.** CLI preview reports the survivor, duplicate records, linked record IDs, and conflicts without writes. Repeating apply after a completed merge reports zero groups. (Original line 41.)
 
-- [ ] New records from any source go through normalize -> match -> merge-or-create
+- [x] Known cases resolved: national.alpfa.org -> alpfa.org; medc.cventevents.com suppressed via R1-01
 
-  **Partial.** Saved Cvent and Directory inputs, uploads and external intake normalize and match before linking or creating. Governed root merges and a unified matching path are open. (Original line 43.)
+  **Verified locally.** The ALPFA fixture merged on a disposable copy of the saved CRM and preserved all 752 original account IDs. A separate fixture verified the `national.alpfa.org` rule holds ALPFA and its contacts across the merge and later imports. `medc.cventevents.com` stays suppressed, and an unrelated organizer's Cvent registration link stays eligible. (Original line 42.)
 
-- [ ] Admin can manually merge two accounts from the UI
+- [x] New records from any source go through normalize -> match -> merge-or-create
 
-  **Open.** Source review can link evidence to an organization. A manual account-to-account merge action is missing. (Original line 44.)
+  **Verified locally.** The original three-source probe now creates one company and retains all three source records and their IDs. CSV, API, replay, seed and prepared transfer checks passed. (Original line 43.)
+
+- [x] Admin can manually merge two accounts from the UI
+
+  **Verified locally.** Admins and Managers can preview and confirm through the web UI. SDRs and AEs receive 403. The CLI applies as Admin. Stale or unauthorized submissions make no writes, and old links respect survivor permissions. (Original line 44.)
 
 ##### R1-03 Clean account names
 
-- [ ] Name resolution order: Apollo organization name > organizer name from event page > website title / og:site_name > domain-derived fallback
+[Active acceptance checks and saved-data rehearsal](r1-03-account-names.md)
 
-  **Partial.** Source-backed proposals use Cvent organizer, Directory and saved website evidence. Apollo-first resolution and full fallback order are open. (Original line 58.)
+- [x] Name resolution order: Apollo organization name > organizer name from event page > website title / og:site_name > domain-derived fallback
+
+  **Verified with offline evidence.** The resolver follows the specified order and preserves the Directory tier in this two-source CRM. Shared registration pages and unverified external feed metadata cannot supply automatic website names. (Original line 58.)
 
 - [x] `accounts.name_source` records which was used
 
-  **Verified locally.** The account stores name_source and a source reference. Provenance assignment and replay are exercised in tests/test_account_names.py. (Original line 59.)
+  **Verified locally.** The backfill stores the selected source and reference alongside the name and audits each change. (Original line 59.)
 
 - [ ] Backfill script run on all existing accounts (e.g. Theiia -> The Institute of Internal Auditors, Tdsynnex -> TD SYNNEX)
 
-  **Partial.** Exact saved name provenance was recorded for 751 accounts. Full display-name backfill and the named legacy examples remain open. (Original line 60.)
+  **Rehearsed locally.** The disposable 769-account copy recorded 17 updates, including one display-name correction. A repeat made zero changes. SQLite and PostgreSQL fixtures verify both named examples. Their real Cvent company rows are still in identity review. Backfill on the hosted CRM remains separate. (Original line 60.)
 
 - [x] Admin can edit the name inline; manual edits are never overwritten by backfills (`name_source = manual`)
 
-  **Verified locally.** An audited admin edit on the account preserves manual name evidence on refresh and backfill. See tests/test_account_names.py. (Original line 61.)
+  **Verified locally.** Separate Admin, Manager and SDR sessions exercised the account screens. An audited Admin edit survived source refresh and the backfill. (Original line 61.)
 
 ##### R1-06 Account type, platform, timing and stage fields [migration]
 

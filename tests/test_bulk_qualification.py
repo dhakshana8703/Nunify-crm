@@ -10,7 +10,7 @@ from uuid import uuid4
 from app import create_app
 from crm_store import connect, import_snapshot
 from growth_ops import DEFAULT_RULES, qualify_batch
-from workflow_store import DEMO_PASSWORD, timestamp
+from workflow_store import DEMO_PASSWORD, save_suppression_rule, timestamp
 
 
 def saved_record(source, identity):
@@ -28,7 +28,7 @@ class BulkQualificationTest(unittest.TestCase):
         self.addCleanup(self.remove_files)
         self.database = self.directory / "work.sqlite3"
         accounts = {
-            ident: {"name": f"{ident.title()} Organization", "domain": f"{ident}.example.test", "organization_type": "Association"}
+            ident: {"name": f"{ident.title()} Organization", "domain": f"{ident}.example", "organization_type": "Association"}
             for ident in ("expo", "society", "combined", "blocked", "reviewed")
         }
         records = [
@@ -52,10 +52,8 @@ class BulkQualificationTest(unittest.TestCase):
                 INSERT INTO qualifications (account_id, score, signals, observed_at, override)
                 VALUES (?, 55, '[{"label":"Manually reviewed"}]', ?, 1)
             """, (self.ids["reviewed"], timestamp(self.now)))
-            connection.execute("""
-                INSERT INTO suppression(kind, value, reason, created_at)
-                VALUES ('domain', 'blocked.example.test', 'Do not call', ?)
-            """, (timestamp(self.now),))
+            save_suppression_rule(connection, "domain", "blocked.example", "manual", None, self.now,
+                                  reason_note="Do not call")
             connection.execute("INSERT INTO workflow_settings (key, value) VALUES ('qualification', ?)", (
                 json.dumps(dict(DEFAULT_RULES, auto_enabled=True)),
             ))

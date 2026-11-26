@@ -6,6 +6,12 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from account_identity_schema import initialize_account_identity
+from account_redirects import account_identity_rows
+from crm_core.account_identity import corroborated_account
+from organization_identity import root_domain
+from suppression_projection import account_projection_available, refresh_account_suppression
+
 
 DEFAULT_DB = Path(__file__).resolve().parent / "instance" / "demo.sqlite3"
 
@@ -94,6 +100,19 @@ def initialize(database_path):
         else:
             connection.execute("PRAGMA journal_mode = WAL").fetchone()
         connection.executescript(SCHEMA)
+        with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            initialize_account_identity(connection)
+
+
+def has_accounts(connection):
+    return connection.execute("""
+        SELECT a.id FROM accounts a WHERE NOT EXISTS (SELECT 1 FROM account_merges WHERE from_id = a.id) LIMIT 1
+    """).fetchone() is not None
+
+
+def unlinked_source_count(connection):
+    return connection.execute("SELECT COUNT(*) FROM source_records WHERE account_id IS NULL").fetchone()[0]
 
 
 def table_exists(connection, name):
@@ -105,12 +124,30 @@ def table_exists(connection, name):
     return connection.execute(sql, (name,)).fetchone() is not None
 
 
+def insert_rows(connection, table, fields, rows):
+    """Batch inserts for trusted internal identifiers, with all row values bound."""
+    fields = tuple(fields)
+    rows = list(rows)
+    if not fields or not all(name.isidentifier() for name in (table, *fields)):
+        raise ValueError("Invalid bulk insert identifiers.")
+    placeholders = "(" + ", ".join("?" for _ in fields) + ")"
+    columns = ", ".join(fields)
+    for start in range(0, len(rows), 100):
+        batch = rows[start:start + 100]
+        values = ", ".join(placeholders for _ in batch)
+        connection.execute(
+            f"INSERT INTO {table} ({columns}) VALUES {values}",
+            tuple(value for row in batch for value in row),
+        )
+
+
 def account_summaries(connection):
     rows = connection.execute("""
         SELECT a.*,
                COUNT(CASE WHEN r.source = 'cvent' THEN 1 END) AS event_count,
                COUNT(CASE WHEN r.source = 'directory' THEN 1 END) AS listing_count
         FROM accounts a LEFT JOIN source_records r ON a.id = r.account_id
+        WHERE NOT EXISTS (SELECT 1 FROM account_merges WHERE from_id = a.id)
         GROUP BY a.id
         ORDER BY a.id
     """)
@@ -146,57 +183,76 @@ def directory_listings(connection, account_id):
     return [dict(json.loads(row["details_json"]), reason=row["review_reason"]) for row in rows]
 
 
+class SqlSeedSnapshot:
+    def __init__(self, connection):
+        self.connection = connection
+        self.created_accounts = []
+        self.requested_account_ids = {}
+
+    def ensure_account(self, identity, account):
+        root = root_domain(account["domain"])
+        if not root:
+            raise ValueError(f"Choose a valid organization domain for {identity}.")
+        candidates = account_identity_rows(self.connection, root)
+        linked = next((candidate for candidate in candidates if candidate["identity_key"] == identity), None)
+        if linked is None and self.connection.execute(
+            "SELECT id FROM accounts WHERE identity_key = ?", (identity,),
+        ).fetchone() is not None:
+            raise ValueError(f"Review required before changing the account domain for {identity}.")
+        if candidates:
+            match = corroborated_account(candidates, account["name"], identity_key=identity)
+            if match is None:
+                raise ValueError(f"Review the organization identity before linking {identity}.")
+            self.requested_account_ids[identity] = match["canonical_id"]
+            return
+        result = self.connection.execute("""
+            INSERT INTO accounts (identity_key, name, domain, organization_type, root_domain)
+            VALUES (?, ?, ?, ?, ?)
+        """, (identity, account["name"], account["domain"], account["organization_type"], root))
+        self.created_accounts.append(result.lastrowid)
+
+    def account_ids(self):
+        ids = {row["identity_key"]: row["canonical_id"] for row in account_identity_rows(self.connection)}
+        return ids | self.requested_account_ids
+
+    def record_link(self, source, source_id):
+        return self.connection.execute("""
+            SELECT account_id FROM source_records WHERE source = ? AND source_id = ?
+        """, (source, source_id)).fetchone()
+
+    def write_record(self, record, account_id):
+        result = self.connection.execute("""
+            INSERT INTO source_records (
+                source, source_id, source_url, source_file, account_id, review_reason, details_json, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (source, source_id) DO UPDATE SET
+                source_url = excluded.source_url,
+                source_file = excluded.source_file,
+                review_reason = excluded.review_reason,
+                details_json = excluded.details_json,
+                raw_json = excluded.raw_json
+            WHERE source_records.source_url IS NOT excluded.source_url
+               OR source_records.source_file IS NOT excluded.source_file
+               OR source_records.review_reason IS NOT excluded.review_reason
+               OR source_records.details_json IS NOT excluded.details_json
+               OR source_records.raw_json IS NOT excluded.raw_json
+        """, (record["source"], record["source_id"], record["source_url"], record["source_file"], account_id,
+              record["reason"], json.dumps(record["details"], sort_keys=True, ensure_ascii=False),
+              json.dumps(record["raw"], sort_keys=True, ensure_ascii=False)))
+        return result.rowcount
+
+
 def import_snapshot(database_path, accounts, records):
+    from crm_core.transfer import seed_snapshot
+
     initialize(database_path)
     with closing(connect(database_path)) as connection, connection:
         # Reserve the writer so a concurrent replay sees the first import's identities.
         connection.execute("BEGIN IMMEDIATE")
-        for identity, account in accounts.items():
-            connection.execute("""
-                INSERT INTO accounts (identity_key, name, domain, organization_type)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (identity_key) DO NOTHING
-            """, (identity, account["name"], account["domain"], account["organization_type"]))
-        account_ids = {
-            row["identity_key"]: row["id"]
-            for row in connection.execute("SELECT id, identity_key FROM accounts")
-        }
-
-        changes = 0
-        seen = set()
-        for record in records:
-            key = (record["source"], record["source_id"])
-            if key in seen:
-                raise ValueError(f"Duplicate input source record: {key}")
-            seen.add(key)
-            identity = record["identity_key"]
-            account_id = account_ids[identity] if identity is not None else None
-            current = connection.execute("""
-                SELECT account_id FROM source_records WHERE source = ? AND source_id = ?
-            """, key).fetchone()
-            if current is not None and current["account_id"] != account_id:
-                raise ValueError(f"Review required before changing the account link for {key}")
-
-            result = connection.execute("""
-                INSERT INTO source_records (
-                    source, source_id, source_url, source_file, account_id, review_reason,
-                    details_json, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (source, source_id) DO UPDATE SET
-                    source_url = excluded.source_url,
-                    source_file = excluded.source_file,
-                    review_reason = excluded.review_reason,
-                    details_json = excluded.details_json,
-                    raw_json = excluded.raw_json
-                WHERE source_records.source_url IS NOT excluded.source_url
-                   OR source_records.source_file IS NOT excluded.source_file
-                   OR source_records.review_reason IS NOT excluded.review_reason
-                   OR source_records.details_json IS NOT excluded.details_json
-                   OR source_records.raw_json IS NOT excluded.raw_json
-            """, (*key, record["source_url"], record["source_file"], account_id, record["reason"],
-                  json.dumps(record["details"], sort_keys=True, ensure_ascii=False),
-                  json.dumps(record["raw"], sort_keys=True, ensure_ascii=False)))
-            changes += result.rowcount
+        store = SqlSeedSnapshot(connection)
+        changes = seed_snapshot(store, accounts, records)
+        if store.created_accounts and account_projection_available(connection):
+            refresh_account_suppression(connection, store.created_accounts)
 
         counts = connection.execute("""
             SELECT COUNT(*) AS source_records,

@@ -18,10 +18,17 @@
 </header>
 <section class="source-panel" aria-labelledby="source-run-heading">
   <header class="panel-header"><h2 id="source-run-heading">Run #{{ run.id }}</h2></header>
-  {% if run.error or run.state in ('ready', 'failed', 'queued', 'running') %}
+  {% if not connector_available or run.error or run.state in ('ready', 'failed', 'queued', 'running') %}
     <div class="workflow-panel-body">
       {% if run.error %}<p class="workflow-notice is-error" role="alert">{{ run.error }}</p>{% endif %}
-      {% if run.state in ('ready', 'failed') %}
+      {% if not connector_available %}
+        <p>Connector disconnected. Saved records remain available.</p>
+        {% if run.state in ('queued', 'running') %}
+          <p>Reconnect the connector to continue this run.</p>
+        {% elif run.state in ('ready', 'failed') %}
+          <p>Reconnect the connector to queue this run.</p>
+        {% endif %}
+      {% elif run.state in ('ready', 'failed') %}
         <form method="post" action="{{ url_for('source_ops.queue_run', run_id=run.id) }}">
           {{ csrf() }}
           <button class="button button-primary" type="submit">{{ 'Retry run' if run.state == 'failed' else ('Promote eligible ' ~ ('listings' if run.adapter == 'directory' else 'events') if full_import else 'Queue import') }}</button>

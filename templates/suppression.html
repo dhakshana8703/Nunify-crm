@@ -2,17 +2,28 @@
 {% from 'workflow_ui.html' import page_links with context %}
 {% block title %}Suppression | Nunify CRM{% endblock %}
 {% block content %}
-  <header class="page-header"><h1>Suppression</h1></header>
+  <header class="page-header">
+    <h1>Suppression</h1>
+    <p>Block enrichment, email unlock and outreach for selected accounts, domains or email addresses.</p>
+  </header>
   <section class="source-panel workflow-panel">
     <header class="panel-header"><h2>Add rules</h2></header>
     <form class="workflow-form workflow-panel-body" method="post" enctype="multipart/form-data" action="{{ url_for('growth_ops.add_rule') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Kind <select name="kind"><option>domain</option><option>email</option><option>account</option></select></label>
       <label>Domain, address or account ID <input name="value"></label>
-      <label>Reason <input name="reason"></label>
-      <label>Or CSV with kind, value, reason <input type="file" name="rules" accept=".csv,text/csv"></label>
+      <label>Reason <select name="reason">
+        <option value="">Choose a reason</option>
+        {% for code, label in reason_labels.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+      </select></label>
+      <label>Note (optional) <input name="reason_note" maxlength="180"></label>
+      <label>Or upload CSV <input type="file" name="rules" accept=".csv,text/csv" aria-describedby="suppression-csv-help"></label>
       <button type="submit">Add rules</button>
     </form>
+    <div class="workflow-panel-body" id="suppression-csv-help">
+      <p>CSV columns are <code>kind</code>, <code>value</code>, <code>reason</code> and optional <code>reason_note</code>.</p>
+      <p>Use one of these reason codes in the CSV. <code>{{ reason_labels | join(', ') }}</code></p>
+    </div>
   </section>
   <section class="source-panel workflow-panel">
     <header class="panel-header"><h2>Active rules</h2></header>
@@ -25,7 +36,8 @@
     </form>
     <ul class="workflow-list workflow-panel-body">
       {% for item in items %}
-        <li><strong>{{ item.value }}</strong> · {{ item.kind }} · {{ item.reason }}
+        <li><strong>{{ item.value }}</strong> - {{ item.kind }} - {{ item.reason_label }} - {{ item.source_label }}
+          {% if item.reason_note %}<p>{{ item.reason_note }}</p>{% endif %}
           <form class="workflow-form" method="post" action="{{ url_for('growth_ops.remove_rule', rule_id=item.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Remove rule</button>
           </form>

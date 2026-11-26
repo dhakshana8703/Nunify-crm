@@ -8,7 +8,8 @@ import unittest
 
 from app import create_app
 from crm_store import connect
-from import_demo import SOURCE_PARENT, import_demo
+from import_demo import import_demo
+from source_fixtures import DEMO_EVENT_NAME, DEMO_MEMBERS, write_demo_fixtures
 from workflow_store import DEMO_PASSWORD
 
 
@@ -40,7 +41,8 @@ class RepWorkflowTest(unittest.TestCase):
         self.test_dir.mkdir(parents=True)
         self.addCleanup(self.remove_test_files)
         self.database = self.test_dir / "demo.sqlite3"
-        result = import_demo(self.database, SOURCE_PARENT / "cvent-scrapper", SOURCE_PARENT / "association")
+        write_demo_fixtures(self.test_dir)
+        result = import_demo(self.database, self.test_dir, self.test_dir)
         self.aarp = next(row["id"] for row in result["accounts"] if row["identity_key"] == "aarp")
         self.ctaa = next(row["id"] for row in result["accounts"] if row["identity_key"] == "ctaa")
         self.account_url = f"/accounts/{self.aarp}"
@@ -119,8 +121,8 @@ class RepWorkflowTest(unittest.TestCase):
             self.assertEqual(page.data.count(b'<li class="source-label">Cvent</li>'), 1)
             self.assertEqual(page.data.count(b'<li class="source-label">Directory of Associations</li>'), 1)
         self.assertIn(b"Why this account matters", account.data)
-        self.assertIn(b"AARP WY 2026 Volunteer Summit", account.data)
-        self.assertIn(b"32,000,000", account.data)
+        self.assertIn(DEMO_EVENT_NAME.encode(), account.data)
+        self.assertIn(DEMO_MEMBERS.encode(), account.data)
         self.assertIn(b'name="due_tomorrow"', account.data)
         self.assertEqual(other_rep.get(self.account_url).status_code, 403)
         self.assertEqual(other_rep.get(f"/api/events?account_id={self.aarp}").status_code, 403)
@@ -293,6 +295,31 @@ class RepWorkflowTest(unittest.TestCase):
             (linked["id"], coverer_id, linked["created_by"], linked["activity_id"]),
             (standalone["id"], coverer_id, coverer_id, None),
         ])
+
+    def test_snooze_and_completion_keep_the_permanent_owner_and_peer_scope(self):
+        manager = self.login("manager", "/assignment")
+        rep = self.login("riya", "/today")
+        peer = self.login("jordan", "/today")
+        self.assertEqual(self.assign(manager, "riya").status_code, 303)
+        create = f"{self.account_url}/tasks"
+        form = self.form_data(rep.get(self.account_url), create)
+        self.assertEqual(rep.post(create, data={**form, "title": "Prepare saved evidence",
+                                               "due_on": "2026-11-21"}).status_code, 303)
+        with closing(connect(self.database, read_only=True)) as connection:
+            task_id = connection.execute("SELECT id FROM tasks WHERE account_id = ?", (self.aarp,)).fetchone()[0]
+        action = f"/tasks/{task_id}"
+        peer_form = self.form_data(peer.get("/today"), "/logout")
+        self.assertEqual(peer.post(action, data={**peer_form, "action": "snooze"}).status_code, 403)
+        today = self.form_data(rep.get("/today"), action)
+        self.assertEqual(rep.post(action, data={**today, "action": "snooze"}).status_code, 303)
+        tomorrow = rep.get("/today?bucket=tomorrow")
+        self.assertIn(b"Prepare saved evidence", tomorrow.data)
+        self.assertIn(b"2026-11-22", tomorrow.data)
+        with closing(connect(self.database, read_only=True)) as connection:
+            saved = connection.execute("SELECT status, due_on, owner_id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        self.assertEqual(tuple(saved), ("snoozed", "2026-11-22", self.user_id("riya")))
+        self.assertEqual(rep.post(action, data={**self.form_data(tomorrow, action), "action": "complete"}).status_code, 303)
+        self.assertNotIn(b"Prepare saved evidence", rep.get("/today?bucket=tomorrow").data)
 
     def test_concurrent_assignment_rejects_stale_revision_and_transfer_keeps_task(self):
         manager = self.login("manager", "/assignment")

@@ -100,7 +100,7 @@ class CventContactImportTest(unittest.TestCase):
                 INSERT INTO suppression(kind, value, reason, created_at) VALUES (?, ?, ?, '2026-11-20')
             """, [
                 ("account", str(excluded), "manual"),
-                ("email", "skip@partner.test", "opted_out"),
+                ("email", "skip@partner.test", "opt_out"),
                 ("domain", "*.closed.partner.test", "competitor"),
             ])
             self.connection.execute("""

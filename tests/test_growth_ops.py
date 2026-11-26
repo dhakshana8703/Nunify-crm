@@ -7,26 +7,22 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 from app import create_app
-from crm_store import connect, import_snapshot
-from directory_source import load_directory_records
+from crm_store import connect
 from growth_ops import OfflineApollo, enrich_one
-from import_demo import ACCOUNTS, SOURCE_PARENT, load_cvent_records
+from import_demo import import_demo
+from source_fixtures import write_demo_fixtures
 from workflow_store import DEMO_PASSWORD
 
 
 class GrowthOpsTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.records = load_cvent_records(SOURCE_PARENT / "cvent-scrapper")
-        cls.records += load_directory_records(SOURCE_PARENT / "association")
-
     def setUp(self):
         instance = Path(__file__).resolve().parents[1] / "instance"
         self.directory = instance / f"growth-test-{uuid4().hex}"
         self.directory.mkdir(parents=True)
         self.addCleanup(self._clean_files)
         self.database = self.directory / "growth.sqlite3"
-        result = import_snapshot(self.database, ACCOUNTS, self.records)
+        write_demo_fixtures(self.directory)
+        result = import_demo(self.database, self.directory, self.directory)
         self.aarp = next(row["id"] for row in result["accounts"] if row["identity_key"] == "aarp")
         self.app = create_app(self.database, demo=True)
         self.app.testing = True
@@ -102,14 +98,14 @@ class GrowthOpsTest(unittest.TestCase):
         route = self._assign_and_qualify()
         self.assertEqual(self._post(self.rep, route).status_code, 303)
         self.assertEqual(self._post(self.admin, "/suppression", kind="account", value=self.aarp,
-                                    reason="Test outreach restriction").status_code, 303)
+                                    reason="manual", reason_note="Test outreach restriction").status_code, 303)
         offline = Mock(side_effect=OfflineApollo())
         self.assertEqual(self._worker(offline), 1)
         offline.assert_not_called()
         with closing(connect(self.database)) as connection:
             job = connection.execute("SELECT state, error FROM credit_jobs").fetchone()
             self.assertEqual(job["state"], "blocked")
-            self.assertIn("suppression changed", job["error"].casefold())
+            self.assertEqual(job["error"], "Suppression blocked provider delivery (Test outreach restriction).")
             self.assertEqual(connection.execute("SELECT count(*) FROM credit_ledger").fetchone()[0], 0)
 
     def test_manager_can_queue_a_midrange_fit_score(self):

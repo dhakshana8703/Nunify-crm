@@ -25,6 +25,9 @@
           <a class="nav-link workflow-nav{% if request.endpoint == 'workflow.today' %} is-current{% endif %}" href="{{ url_for('workflow.today') }}"{% if request.endpoint == 'workflow.today' %} aria-current="page"{% endif %}>Team queue</a>
           <a class="nav-link workflow-nav{% if request.blueprint == 'source_review' %} is-current{% endif %}" href="{{ url_for('source_review.index') }}"{% if request.blueprint == 'source_review' %} aria-current="page"{% endif %}>Source review</a>
           <a class="nav-link workflow-nav{% if request.blueprint == 'account_names' %} is-current{% endif %}" href="{{ url_for('account_names.index') }}">Account name review</a>
+          {% if 'account_merges.index' in view_endpoints|default([]) %}
+            <a class="nav-link workflow-nav{% if request.blueprint == 'account_merges' %} is-current{% endif %}" href="{{ url_for('account_merges.index') }}"{% if request.blueprint == 'account_merges' %} aria-current="page"{% endif %}>Merge accounts</a>
+          {% endif %}
           <a class="nav-link workflow-nav{% if request.endpoint == 'growth_ops.index' %} is-current{% endif %}" href="{{ url_for('growth_ops.index') }}">Operations</a>
           {% if current_user.role == 'admin' %}
             <a class="nav-link workflow-nav{% if request.endpoint == 'growth_ops.suppression' %} is-current{% endif %}" href="{{ url_for('growth_ops.suppression') }}">Suppression</a>

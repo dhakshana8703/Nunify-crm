@@ -103,7 +103,7 @@ class CventApolloImportTest(unittest.TestCase):
         with self.crm:
             self.crm.execute("""
                 INSERT INTO suppression(kind, value, reason, created_at)
-                VALUES ('email', 'blocked@partner.test', 'opted_out', '2026-11-20')
+                VALUES ('email', 'blocked@partner.test', 'opt_out', '2026-11-20')
             """)
 
         before = self.crm.total_changes

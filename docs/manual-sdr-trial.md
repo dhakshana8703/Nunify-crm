@@ -1,10 +1,10 @@
 # Try the SDR workspace
 
-## First time in Nunify
+## First manager review
 
-Use the [Association and Cvent trial](http://127.0.0.1:5002/login) for this first test. The old port 5001 address opens the same sign-in. Use the passwords provided in the trial handoff.
+Use the [local CRM](http://127.0.0.1:5002/login) for this review with saved Cvent data. Use the local passwords provided in the trial handoff. The first goal is to show that an SDR can work an existing Cvent prospect safely and that the manager can see the next action.
 
-1. **Admin.** Sign in as `admin@nunify.com`. On **Sources**, open the Ready **Cvent - master_cvent_events.json** run, or click **Stage Cvent export** to start a fresh preview. The run page updates as the worker progresses. When it is Ready, open **Review unresolved records** to see what needs a check, then use **Promote eligible events** to apply the eligible rows. The saved export in this trial has 542 records.
+1. **Admin.** Sign in as `admin@nunify.com`. Open **Suppression** and point to the existing `cvent.com` rule with reason **Competitor**. Explain that a company, domain or email can be blocked from normal outreach and paid Apollo lookups. This is Goutham's [R1-01](stories/01_R1a_prerequisites.md#r1-01-suppression-list-migration).
 2. **Manager.** Sign out and sign in as `manager@nunify.com`. On **Assignments**, set **Owner status** to **Qualified and unassigned** and select **SIFMA** under **Choose a company**. Select **Riya Rao** under **New owner**, then click **Assign**. Look for **Assignment saved for SIFMA**. If Riya already owns SIFMA, start with step 3.
 3. **SDR.** Sign out and sign in as `riya@nunify.com`. Open **SIFMA** from **Today** or **My Accounts**. Check its **Cvent** tag, source evidence, and **Contacts**. Choose a contact marked **Previously unlocked** for the exercise. In **Log activity**, simulate a **Call** with **No answer**. Check **Use tomorrow**, set **Next action** to `Call SIFMA again`, and click **Save activity**. Open **Today**, then **Tomorrow**. You should see one follow-up under SIFMA.
 4. **Manager check.** Sign in as the manager again. Open **SIFMA** and check **Follow-ups** for Riya's saved task.
@@ -13,7 +13,9 @@ At each step, note the screen, what you clicked, and what happened. Save those o
 
 ### What to tell your manager
 
-> The admin reviews the imported data and works through records flagged for a check. The manager assigns a company to a rep. The rep can see why the company is a prospect, review the saved contacts, record a call, and set the next follow-up. The manager can see that follow-up on the company record. We are testing with saved data and a simulated call.
+> We start by keeping blocked contacts out of the team's work. You can assign an eligible Cvent account to a rep. When the rep logs a call, the next action stays on the account, so you can see who owns it and when they'll follow up.
+
+To show the two-source model, open **AARP** from **Assignments** with **All accounts** selected. Its account shows both Cvent and Directory of Associations evidence. The hosted Render pilot uses a sample account until the saved records are transferred to Neon.
 
 To restart this trial, run these commands in separate PowerShell windows from the `nunify-crm` folder.
 

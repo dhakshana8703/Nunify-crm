@@ -31,7 +31,7 @@ The worker reads saved source exports and uses local adapters for Apollo and AE 
 
 ## Hosted pilot on Render and Neon
 
-Use a dedicated, empty Neon database for the CRM pilot. Create a Render Python Web Service from the branch with this release. Select the Free instance and set the health check path to `/login`.
+Use a dedicated, empty Neon database for the CRM pilot. Create a Render Python Web Service from the branch with this release and select the Free instance. For a build that includes database readiness, set the health check path to `/healthz`. Check **Operations** for the worker's last completed pass.
 
 | Render setting | Value |
 | --- | --- |
@@ -51,6 +51,34 @@ In Render's **Environment** settings, set `DATABASE_URL` to the direct Neon conn
 
 The first start creates the admin, manager, and Riya sign-ins and adds **Pilot Association** to an empty account list. Set the additional password variables to create separate logins for Arjun, Neha, and Kavya. Each active SDR appears in the manager's assignment dropdown. An earlier pilot's test sign-ins are renamed in place, preserving users' assignments and history. Updated environment passwords take effect on deployment. Assign the sample company to an SDR, save a simulated call with **Use tomorrow**, then redeploy and check the saved follow-up. The pilot starts the web app. Source jobs need a worker, and saved local CRM data needs a separate migration.
 
+### Transfer the prepared companies and contacts once
+
+After the hosted CRM is running, set strong passwords for its users before adding real contacts. From the `nunify-crm` folder on the computer with the saved local CRM, run a preview:
+
+```powershell
+python -B transfer_saved_sources.py
+```
+
+Paste the direct connection URI for the CRM's Neon database at the prompt. The terminal keeps it hidden. Review the proposed counts, then apply:
+
+```powershell
+python -B transfer_saved_sources.py --apply
+```
+
+Enter the same URI and the hosted admin password. The default input is `instance/association-trial.sqlite3`. The transfer copies the saved Cvent and Directory company records, review items, qualification results, source-linked contacts, and prior Apollo unlocks. It preserves existing hosted users, saved work, and suppression rules. Local trial users and sales activity, the demo contact, and raw scrape run history stay in the local database. Identity conflicts stop the transfer and leave the hosted data intact.
+
+On Render, refresh **Assignments** and select **Qualified and unassigned** to start allocating companies. Future imports can run separately through the source worker.
+
+### Transfer the saved companies and Cvent roster
+
+Use the company-only mode for the 769-account saved rehearsal. It also carries the selected Cvent company roster and its review status. Existing hosted work stays in place.
+
+```powershell
+python -B transfer_saved_sources.py --source instance/r1-03-name-rehearsal.sqlite3 --companies-only --apply
+```
+
+Use the direct Neon connection for the database backing the **Nunify CRM** Render service. The command shows the preview before it prompts for the hosted Admin password. Both connection and password prompts keep the typed values hidden. Omit `--apply` to run only the preview.
+
 ## Load and work accounts
 
 For a role-by-role walkthrough, use the [manual SDR trial guide](docs/manual-sdr-trial.md).
@@ -63,7 +91,20 @@ For a role-by-role walkthrough, use the [manual SDR trial guide](docs/manual-sdr
 
 Sources records failed and retried runs. To exercise recovery on a disposable database, queue a saved Cvent run, drain it once with `--cvent-dir instance/missing-source`, then use **Retry run** and drain with the correct input folder.
 
-Future scrapers can send named batches to a scoped endpoint. See [external scraper integration](docs/ingest-api.md) and the [working notes](working.md) for the local behavior and remaining live dependencies.
+### Connect or disconnect a saved source
+
+Set `CRM_SOURCE_CONNECTORS` to the same value for the web app and source worker, then restart both.
+
+| Value | Saved imports available |
+| --- | --- |
+| `cvent,directory` or unset | Cvent and Directory of Associations |
+| `cvent` | Cvent only |
+| `directory` | Directory of Associations only |
+| `none` | Neither saved export |
+
+To disconnect Cvent locally, run `$env:CRM_SOURCE_CONNECTORS = "directory"` in the PowerShell session used to launch each process. In **Sources**, the disconnected source stays visible with its run history. Saved source tags, contacts, ownership, activity and follow-ups stay on the same accounts. Pending jobs and schedules for the disconnected source wait until it is connected again. Restore `cvent,directory` and restart both processes to resume its imports.
+
+CSV, XLSX and external API intake remain available. Add future scrapers through the [external scraper integration](docs/ingest-api.md). Revoke a scraper's key in **Sources** to block future submissions from that scraper. Work already submitted stays in the CRM.
 
 Use **People** to see account-scoped contacts and check their source and email verification status. To preview named Cvent contacts for already-linked events in an existing local database:
 
@@ -89,6 +130,6 @@ Use `--source` to select a matching read-only cache snapshot. Add `--apply --adm
 python -B -m unittest discover -s tests -v
 ```
 
-To include the PostgreSQL rehearsal, set `CRM_TEST_POSTGRES_URL` to a disposable database and rerun the suite. The test uses a dedicated temporary schema and exercises the Admin, Manager and SDR flow across an app restart.
+The default suite uses synthetic source fixtures and runs from a clean checkout. To include the PostgreSQL rehearsal, set `CRM_TEST_POSTGRES_URL` to a disposable database and rerun the suite. The test uses a dedicated temporary schema and exercises the Admin, Manager and SDR flow across an app restart. Pull requests run the same suite with a disposable PostgreSQL service in GitHub Actions once the workflow is pushed.
 
-See [workflow design](docs/workflow-design.md), [delivery and verification](docs/workflow-delivery.md), and Goutham's [architecture](docs/architecture.md) and [stories](docs/stories/00_README.md).
+See the [engineering foundation specification](docs/engineering-foundation.md), [workflow design](docs/workflow-design.md), [delivery and verification](docs/workflow-delivery.md), and Goutham's [architecture](docs/architecture.md) and [stories](docs/stories/00_README.md).

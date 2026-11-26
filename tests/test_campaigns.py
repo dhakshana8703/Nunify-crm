@@ -123,7 +123,8 @@ class CampaignsTest(unittest.TestCase):
             self.assertEqual(tuple(actor), ("Sequencer integration", 0))
             contact = connection.execute("SELECT status, do_not_contact FROM people WHERE id = ?", (self.person_id,)).fetchone()
             self.assertEqual(tuple(contact), ("opted_out", 1))
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM suppression WHERE kind = 'email'").fetchone()[0], 1)
+            rules = connection.execute("SELECT reason, source FROM suppression WHERE kind = 'email'").fetchall()
+            self.assertEqual([tuple(rule) for rule in rules], [("opt_out", "sequencer")])
 
 
 if __name__ == "__main__":

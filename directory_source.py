@@ -4,7 +4,9 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
+
+from source_identity import directory_listing_id as _listing_id
 
 
 @dataclass(frozen=True)
@@ -112,11 +114,6 @@ def _location(row: dict) -> tuple[str | None, str | None, str | None]:
             state = state or address_state
             country = country or address_match["country"]
     return city, state, COUNTRY_NAMES.get((country or "").upper(), country)
-
-
-def _listing_id(source_url: str) -> str:
-    params = parse_qs(urlsplit(source_url).query)
-    return params.get("di", [""])[0].removeprefix("{").removesuffix("}").upper()
 
 
 def _make_record(selection: ListingSelection, row: dict) -> dict:

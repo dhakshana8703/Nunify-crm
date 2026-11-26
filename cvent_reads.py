@@ -1,36 +1,10 @@
 """Cvent event read contract adapted from cvent-scrapper's cvent_db.py."""
 
 import json
-import re
-from datetime import date
+from source_identity import parse_date_to_iso
 
 
-_MONTHS = {
-    month: index
-    for index, month in enumerate(
-        ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"),
-        start=1,
-    )
-}
-_CVENT_DATE = re.compile(r"\b([A-Za-z]{3})\s+(\d{1,2})\b[^\r\n]*?\b(\d{4})\b")
-_ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!\d)")
 _SORT_COLUMNS = {"name": "event_name", "date": "start_date_iso", "company": "organizer_company", "city": "city"}
-
-
-def parse_date_to_iso(date_str):
-    """Normalize the saved date formats to a valid sortable date, when available."""
-    if not date_str:
-        return ""
-    cvent_match = _CVENT_DATE.search(date_str)
-    iso_match = _ISO_DATE.search(date_str)
-    try:
-        if cvent_match and cvent_match[1].lower() in _MONTHS:
-            return date(int(cvent_match[3]), _MONTHS[cvent_match[1].lower()], int(cvent_match[2])).isoformat()
-        if iso_match:
-            return date.fromisoformat(iso_match[0]).isoformat()
-    except ValueError:
-        pass
-    return ""
 
 
 def _event_dict(row):

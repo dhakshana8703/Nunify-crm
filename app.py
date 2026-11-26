@@ -3,15 +3,16 @@
 import argparse
 import os
 import secrets
+import sqlite3
 from contextlib import closing
 
 from flask import Flask, abort, g, jsonify, redirect, render_template, request, url_for
 from werkzeug.exceptions import HTTPException
 
+import account_merges_web
 import account_names
 import account_profile
 import campaigns
-import cvent_contacts
 import growth_ops
 import sales_extensions
 import scraper_ingest
@@ -19,8 +20,13 @@ import source_ops
 import source_review
 import workflow_store
 import workflow_web
-from crm_store import configured_database, connect, directory_listings, initialize, record_evidence
+from crm_store import (
+    configured_database, connect, directory_listings, has_accounts, initialize, record_evidence, unlinked_source_count,
+)
+from account_redirects import canonical_account_id
 from cvent_reads import get_all_cvent_events, get_cvent_event_by_id
+from legacy_contact_store import evidence_for_account as cvent_contact_evidence, initialize_cvent_evidence
+from source_connectors import configured_saved_exports
 
 
 def create_app(database_path=None, *, demo=False):
@@ -33,7 +39,8 @@ def create_app(database_path=None, *, demo=False):
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.environ.get("RENDER") == "true",
         MAX_CONTENT_LENGTH=12 * 1024 * 1024,
-        MACHINE_ENDPOINTS=scraper_ingest.API_ENDPOINTS,
+        MACHINE_ENDPOINTS=scraper_ingest.API_ENDPOINTS | {"healthz"},
+        SOURCE_CONNECTORS=configured_saved_exports(),
         PLANNING_MONTHS_MIN=int(os.environ.get("CRM_PLANNING_MONTHS_MIN", "4")),
         PLANNING_MONTHS_MAX=int(os.environ.get("CRM_PLANNING_MONTHS_MAX", "9")),
     )
@@ -41,7 +48,7 @@ def create_app(database_path=None, *, demo=False):
     with closing(connect(database_path)) as connection:
         account_names.initialize(connection)
         workflow_store.initialize(connection)
-        cvent_contacts.initialize(connection)
+        initialize_cvent_evidence(connection)
         sales_extensions.initialize(connection)
         source_ops.initialize(connection)
         scraper_ingest.initialize(connection)
@@ -50,6 +57,7 @@ def create_app(database_path=None, *, demo=False):
         if demo:
             workflow_store.seed_demo_users(connection)
     app.register_blueprint(workflow_web.bp)
+    app.register_blueprint(account_merges_web.bp)
     app.register_blueprint(account_names.bp)
     app.register_blueprint(account_profile.bp)
     app.register_blueprint(sales_extensions.bp)
@@ -62,6 +70,14 @@ def create_app(database_path=None, *, demo=False):
     app.jinja_env.globals.update(csrf_token=workflow_web.csrf_token, view_endpoints=app.view_functions)
 
     db = workflow_web.db
+
+    @app.get("/healthz")
+    def healthz():
+        try:
+            has_accounts(db())
+        except sqlite3.Error:
+            return jsonify(status="unavailable"), 503
+        return jsonify(status="ready")
 
     @app.after_request
     def cache_policy(response):
@@ -81,9 +97,7 @@ def create_app(database_path=None, *, demo=False):
         return {
             "current_user": user,
             "accounts": workflow_web.readable_accounts()[:8] if user and user["role"] == "sdr" else [],
-            "review_count": db().execute("""
-                SELECT COUNT(*) FROM source_records WHERE account_id IS NULL
-            """).fetchone()[0] if user and user["role"] in workflow_web.STAFF else None,
+            "review_count": unlinked_source_count(db()) if user and user["role"] in workflow_web.STAFF else None,
         }
 
     @app.errorhandler(HTTPException)
@@ -104,7 +118,7 @@ def create_app(database_path=None, *, demo=False):
             context["account_naming"] = account_names.account_context(db(), account_id, g.crm_user)
             context["profile"] = account_profile.context(db(), account, listings)
             contact_evidence = {}
-            for item in cvent_contacts.evidence_for_account(db(), account_id):
+            for item in cvent_contact_evidence(db(), account_id):
                 contact_evidence.setdefault(item["person_id"], []).append(item)
             context["cvent_contact_evidence"] = contact_evidence
             account["owner"] = account["owner_name"] or account["owner"]
@@ -122,7 +136,12 @@ def create_app(database_path=None, *, demo=False):
 
     @app.get("/accounts/<int:account_id>")
     def account_detail(account_id):
-        return show_account(workflow_web.account_required(account_id))
+        active_id = canonical_account_id(db(), account_id)
+        account = workflow_web.account_required(active_id)
+        if active_id != account_id:
+            options = {"show_suppressed": 1} if workflow_web.show_suppressed() else {}
+            return redirect(url_for("account_detail", account_id=active_id, **options))
+        return show_account(account)
 
     @app.get("/review")
     def review():
@@ -164,6 +183,7 @@ def create_app(database_path=None, *, demo=False):
             abort(403)
         account_id = request.args.get("account_id", type=int)
         if account_id is not None:
+            account_id = canonical_account_id(db(), account_id)
             workflow_web.account_required(account_id)
         scoped_ids = None
         if g.crm_user["role"] == "sdr" and account_id is None:

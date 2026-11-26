@@ -1,16 +1,50 @@
 """Sales records, account scope, and transaction helpers."""
 
 import json
-import re
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from urllib.parse import quote, unquote, urlsplit
 from zoneinfo import ZoneInfo
 
 from werkzeug.security import generate_password_hash
 
+from crm_core.access import account_relation as relation_for_account
+from crm_core.contacts import normalized_linkedin_profile
+from crm_core.suppression import matching_rule
+from crm_core.suppression_metadata import REASON_CODES, legacy_reason_metadata, rule_reason_text
+from organization_identity import matches_domain
+from account_identity_schema import initialize_account_identity
+from account_redirects import account_aliases
+from suppression_projection import ensure_account_projection, refresh_account_suppression, suppression_rules
 
-SCHEMA = """
+
+SUPPRESSION_SEED_DOMAINS = (
+    "cvent.com", "cventevents.com", "cvent-production.com", "*.cventevents.com",
+)
+SUPPRESSION_REASON_CHECK = "CONSTRAINT suppression_reason_valid CHECK (reason IN (" + ", ".join(
+    f"'{code}'" for code in REASON_CODES
+) + "))"
+SUPPRESSION_METADATA_COLUMNS = {
+    "source": "TEXT NOT NULL DEFAULT 'manual'",
+    "reason_note": "TEXT NOT NULL DEFAULT ''",
+    "removed_at": "TEXT",
+}
+SUPPRESSION_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS suppression (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('domain', 'email', 'account')),
+    value TEXT NOT NULL COLLATE NOCASE,
+    reason TEXT NOT NULL,
+    source {SUPPRESSION_METADATA_COLUMNS["source"]},
+    reason_note {SUPPRESSION_METADATA_COLUMNS["reason_note"]},
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    removed_at {SUPPRESSION_METADATA_COLUMNS["removed_at"]},
+    {SUPPRESSION_REASON_CHECK},
+    UNIQUE (kind, value)
+);
+"""
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -85,15 +119,9 @@ CREATE TABLE IF NOT EXISTS audit_events (
     details TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS suppression (
-    id INTEGER PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('domain', 'email', 'account')),
-    value TEXT NOT NULL COLLATE NOCASE,
-    reason TEXT NOT NULL,
-    created_by INTEGER REFERENCES users(id),
-    created_at TEXT NOT NULL,
-    UNIQUE (kind, value)
-);
+CREATE INDEX IF NOT EXISTS audit_events_account_name_change ON audit_events(account_id)
+    WHERE action = 'account_name_changed';
+{SUPPRESSION_SCHEMA}
 CREATE TABLE IF NOT EXISTS workflow_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -109,6 +137,7 @@ ACCOUNT_QUERY = """
     FROM accounts a
     LEFT JOIN account_work w ON w.account_id = a.id
     LEFT JOIN users u ON u.id = w.owner_id
+    WHERE NOT EXISTS (SELECT 1 FROM account_merges WHERE from_id = a.id)
 """
 
 DEMO_PASSWORD = "nunify-demo"
@@ -140,9 +169,50 @@ def transaction(connection):
         yield
 
 
+def _legacy_suppression_row(rule, columns):
+    reason, original = legacy_reason_metadata(rule["reason"])
+    note = (rule["reason_note"] if "reason_note" in columns else "") or original
+    is_seed = (
+        rule["created_by"] is None and rule["kind"] == "domain" and reason == "competitor"
+        and rule["value"].lower() in SUPPRESSION_SEED_DOMAINS
+    )
+    source = (rule["source"] if "source" in columns else "") or ("seed" if is_seed else "legacy")
+    removed_at = rule["removed_at"] if "removed_at" in columns else None
+    return (rule["id"], rule["kind"], rule["value"], reason, source, note,
+            rule["created_by"], rule["created_at"], removed_at)
+
+
+def _migrate_suppression_metadata(connection):
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(suppression)")}
+    missing = SUPPRESSION_METADATA_COLUMNS.keys() - columns
+    if not missing:
+        return False
+
+    rows = [_legacy_suppression_row(rule, columns) for rule in connection.execute("SELECT * FROM suppression")]
+    if getattr(connection, "dialect", "sqlite") == "postgresql":
+        for column, definition in SUPPRESSION_METADATA_COLUMNS.items():
+            if column in missing:
+                connection.execute(f"ALTER TABLE suppression ADD COLUMN {column} {definition}")
+        connection.executemany("""
+            UPDATE suppression SET reason = ?, source = ?, reason_note = ? WHERE id = ?
+        """, [(row[3], row[4], row[5], row[0]) for row in rows])
+        connection.execute(f"ALTER TABLE suppression ADD {SUPPRESSION_REASON_CHECK}")
+    else:
+        connection.execute("ALTER TABLE suppression RENAME TO suppression_pre_r101")
+        connection.execute(SUPPRESSION_SCHEMA)
+        connection.executemany("""
+            INSERT INTO suppression(id, kind, value, reason, source, reason_note, created_by, created_at, removed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, rows)
+        connection.execute("DROP TABLE suppression_pre_r101")
+    return True
+
+
 def initialize(connection):
     connection.executescript(SCHEMA)
     with transaction(connection):
+        if not connection.execute("PRAGMA table_info(account_merges)").fetchone():
+            initialize_account_identity(connection)
         columns_to_add = {
             "people": {
                 "phone": "TEXT NOT NULL DEFAULT ''",
@@ -168,16 +238,24 @@ def initialize(connection):
             CREATE UNIQUE INDEX IF NOT EXISTS tasks_creation_request
             ON tasks(created_by, request_key) WHERE request_key IS NOT NULL
         """)
+        metadata_changed = _migrate_suppression_metadata(connection)
         seeded = connection.execute("""
             INSERT OR IGNORE INTO workflow_settings(key, value) VALUES ('suppression_seed', '1')
         """)
         if seeded.rowcount:
             connection.executemany("""
-                INSERT OR IGNORE INTO suppression(kind, value, reason, created_at)
-                VALUES ('domain', ?, 'Competitor', ?)
-            """, [(domain, timestamp()) for domain in (
-                "cvent.com", "cventevents.com", "cvent-production.com", "*.cventevents.com",
-            )])
+                INSERT OR IGNORE INTO suppression(kind, value, reason, source, created_at)
+                VALUES ('domain', ?, 'competitor', 'seed', ?)
+            """, [(domain, timestamp()) for domain in SUPPRESSION_SEED_DOMAINS])
+        normalized_hosts = connection.execute("""
+            INSERT OR IGNORE INTO workflow_settings(key, value) VALUES ('suppression_idn_hosts', '1')
+        """)
+        company_domains = connection.execute("""
+            INSERT OR IGNORE INTO workflow_settings(key, value) VALUES ('suppression_company_domains', '1')
+        """)
+        projection_changed = ensure_account_projection(connection)
+        if projection_changed or metadata_changed or seeded.rowcount or normalized_hosts.rowcount or company_domains.rowcount:
+            refresh_account_suppression(connection)
 
 
 def seed_demo_users(connection):
@@ -193,7 +271,7 @@ def seed_demo_users(connection):
 def account_rows(connection, today, account_id=None):
     if account_id is None:
         return [dict(row) for row in connection.execute(ACCOUNT_QUERY + " ORDER BY a.id", (today,))]
-    row = connection.execute(ACCOUNT_QUERY + " WHERE a.id = ?", (today, account_id)).fetchone()
+    row = connection.execute(ACCOUNT_QUERY + " AND a.id = ?", (today, account_id)).fetchone()
     return dict(row) if row else None
 
 
@@ -208,63 +286,43 @@ def active_coverage(connection, account, now=None):
 
 
 def account_relation(connection, account, user, now=None):
-    if account["owner_id"] == user["id"]:
-        return "Owned"
-    if user["role"] == "sdr" and account["owner_id"]:
-        grant = active_coverage(connection, account, now)
-        if grant and grant["rep_id"] == user["id"]:
-            return "Coverage"
-    return "Assigned" if account["owner_id"] else "Unassigned"
+    return relation_for_account(account, user, lambda row: active_coverage(connection, row, now))
 
 
-def matches_domain(host, rule):
-    host = host.casefold().strip().rstrip(".")
-    rule = rule.casefold().strip().rstrip(".").removeprefix("*.")
-    return bool(rule) and (host == rule or host.endswith("." + rule))
+def save_suppression_rule(connection, kind, value, reason, actor_id, observed_at, *,
+                          source="manual", reason_note="", refresh=True):
+    result = connection.execute("""
+        INSERT INTO suppression(kind, value, reason, source, reason_note, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (kind, value) DO UPDATE SET reason = excluded.reason,
+            source = excluded.source, reason_note = excluded.reason_note,
+            created_by = excluded.created_by, created_at = excluded.created_at, removed_at = NULL
+        WHERE suppression.removed_at IS NOT NULL
+    """, (kind, value, reason, source, reason_note, actor_id, timestamp(observed_at)))
+    if not result.rowcount:
+        return None
+    if refresh and kind in ("domain", "account"):
+        refresh_account_suppression(connection)
+    return connection.execute("SELECT id FROM suppression WHERE kind = ? AND value = ?", (kind, value)).fetchone()[0]
 
 
-def normalized_linkedin_profile(value):
-    if not value:
-        return ""
-    try:
-        url = urlsplit(value if "://" in value else "https://" + value)
-        host = url.hostname or ""
-        path = unquote(url.path, errors="strict")
-        profile = re.fullmatch(r"/in/([\w-]+)/?", path)
-        if (url.scheme in {"http", "https"} and not url.username and not url.password
-                and url.port in {None, 80 if url.scheme == "http" else 443}
-                and re.fullmatch(r"(?:www\.|[a-z]{2}\.)?linkedin\.com", host) and profile):
-            return "https://www.linkedin.com/in/" + quote(profile[1].casefold(), safe="-")
-    except (ValueError, UnicodeError):
-        pass
-    return None
-
-
-def suppression_reason(connection, account_id, person_id=None):
+def suppression_reason(connection, account_id, person_id=None, *, candidate_email=None):
     account = connection.execute("SELECT domain FROM accounts WHERE id = ?", (account_id,)).fetchone()
     if account is None:
         return None
     person = connection.execute(
         "SELECT email, do_not_contact FROM people WHERE id = ? AND account_id = ?", (person_id, account_id),
     ).fetchone() if person_id is not None else None
-    email = person["email"].strip().casefold() if person else ""
     if person and person["do_not_contact"]:
         return "Contact marked do not contact"
-    for rule in connection.execute("SELECT kind, value, reason FROM suppression ORDER BY id"):
-        value = rule["value"].casefold()
-        if (
-            (rule["kind"] == "account" and value == str(account_id))
-            or (rule["kind"] == "email" and email and email == value)
-            or (rule["kind"] == "domain" and (
-                matches_domain(account["domain"], value) or matches_domain(email.rpartition("@")[2], value)
-            ))
-        ):
-            return rule["reason"]
-    return None
+    emails = (person["email"] if person else "", candidate_email)
+    aliases = account_aliases(connection, (account_id,)).get(account_id, ())
+    rule = matching_rule(suppression_rules(connection), account_id, account["domain"], emails, aliases=aliases)
+    return rule_reason_text(rule) if rule is not None else None
 
 
-def is_blocked(connection, account_id, person_id=None):
-    return bool(suppression_reason(connection, account_id, person_id))
+def is_blocked(connection, account_id, person_id=None, *, candidate_email=None):
+    return bool(suppression_reason(connection, account_id, person_id, candidate_email=candidate_email))
 
 
 def audit(connection, user_id, account_id, action, details, now=None):

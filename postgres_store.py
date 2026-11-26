@@ -99,6 +99,7 @@ class PostgresConnection:
         from psycopg2.extras import DictCursor
 
         self._driver = psycopg2
+        self._read_only = read_only
         self._transaction = False
         try:
             self._connection = psycopg2.connect(dsn, cursor_factory=DictCursor, connect_timeout=10)
@@ -139,7 +140,8 @@ class PostgresConnection:
         self._run("BEGIN").close()
         self._transaction = True
         try:
-            self._run(f"SELECT pg_advisory_xact_lock({CRM_WRITER_LOCK})").close()
+            if not self._read_only:
+                self._run(f"SELECT pg_advisory_xact_lock({CRM_WRITER_LOCK})").close()
         except sqlite3.Error:
             self.rollback()
             raise

@@ -175,7 +175,8 @@ class SalesExtensionsTest(unittest.TestCase):
         self.assertEqual(queued.status_code, 303)
         with closing(connect(self.database)) as connection, connection:
             connection.execute("""
-                INSERT INTO suppression (kind, value, reason, created_at) VALUES ('account', ?, 'Manual review', ?)
+                INSERT INTO suppression (kind, value, reason, reason_note, created_at)
+                VALUES ('account', ?, 'manual', 'Manual review', ?)
             """, (str(self.account_id), timestamp(self.now)))
 
         calls = []

@@ -9,3 +9,22 @@ Assignment and task transfer commit together. Activity, contact status, account 
 Handoffs save the intent and delivery state before a provider call. The worker claims work with a recoverable lease, uses a stable idempotency key, and records failures for an authorized retry. Source runs stage raw records, validate and resolve them, and record outcomes. A run that stops can be retried against the same inputs. Imports and provider jobs execute outside the web request. Local development uses offline delivery and provider adapters. Live configuration and Neon verification are separate rollout checks.
 
 This build uses end-to-end workflows to sequence work from the existing two-source prototype. It brings assignment and handoff visibility into the first usable sales build and uses SQLite for local verification. The original story pack remains the sales reference.
+
+## Core and adapters
+
+```mermaid
+flowchart LR
+    Web[Flask forms and API] --> Core[CRM use cases]
+    CLI[Operator and migration commands] --> Core
+    Worker[Background worker] --> Core
+    Readers[Saved export readers] --> Worker
+    Core --> Ports[Storage and provider contracts]
+    Stores[SQLite and PostgreSQL adapters] -. implement .-> Ports
+    Providers[Enrichment and delivery adapters] -. implement .-> Ports
+```
+
+The `crm_core` modules govern permissions, assignment and allocation, activity and follow-ups, contacts, account evidence, outreach restrictions, qualification, enrichment, handoff, coverage, campaigns, source intake and review, and snapshot transfer. Web forms carry authenticated actor and revision information. SQL adapters implement the ports and use the caller's transaction for atomic writes. Queries project stored facts for rendering. The worker composes storage, source readers and job providers independently of Flask.
+
+Connector configuration changes only future imports and jobs. Source identity, staged history and sales ownership remain in the database. Preserve held or ambiguous records for authorized review. See the [foundation acceptance criteria](engineering-foundation.md) and [external source contract](ingest-api.md).
+
+The architecture tests check the dependencies of every core module, reject direct SQL in Flask endpoints, and load the worker with the web adapters unavailable. Run the business-flow checks as well to verify behavior that a dependency check cannot prove. Document new business rules and acceptance cases before wiring a new route, command, or connector.

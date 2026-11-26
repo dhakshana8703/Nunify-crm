@@ -8,21 +8,26 @@
 </header>
 
 <section class="source-panel workflow-section" aria-labelledby="sources-list-heading">
-  <header class="panel-header"><h2 id="sources-list-heading">Connected sources</h2></header>
+  <header class="panel-header"><h2 id="sources-list-heading">Source connections</h2></header>
   <div class="workflow-list">
     {% for source in sources %}
+      {% set saved_source = source.adapter in ('cvent', 'directory') %}
       <div class="workflow-row">
         <div>
           <strong>{{ source.name }}</strong>
-          {% if source.adapter in ('cvent', 'directory') %}
-            <p>Saved source · {% if source.next_run_at %}Next run {{ source.next_run_at[:16]|replace('T', ' ') }} UTC{% else %}Schedule paused{% endif %}</p>
+          {% if saved_source %}
+            {% if source.slug in saved_exports %}
+              <p>Saved source - {% if source.next_run_at %}Next run {{ source.next_run_at[:16]|replace('T', ' ') }} UTC{% else %}Schedule paused{% endif %}</p>
+            {% else %}
+              <p>Connector disconnected. Saved records remain available.</p>
+            {% endif %}
           {% elif source.adapter == 'external' %}
             <p>API ID <code>{{ source.slug }}</code> · {{ 'Key active' if source.key_active else 'Key revoked' }}</p>
           {% else %}
             <p>CSV and XLSX</p>
           {% endif %}
         </div>
-        {% if source.adapter in ('cvent', 'directory') %}
+        {% if saved_source and source.slug in saved_exports %}
           <div class="workflow-item-actions">
             <details>
               <summary>Schedule</summary>
@@ -73,7 +78,7 @@
       </div>
     {% endfor %}
   </div>
-  <p class="workflow-panel-body">Schedules prepare saved-export previews for approval.</p>
+  {% if saved_exports %}<p class="workflow-panel-body">Schedules prepare saved-export previews for approval.</p>{% endif %}
 </section>
 
 {% if health_events %}
@@ -89,6 +94,7 @@
   </div>
 </section>
 {% endif %}
+{% if 'directory' in saved_exports %}
 <section class="source-panel workflow-section" aria-labelledby="directory-export-heading">
   <header class="panel-header"><h2 id="directory-export-heading">Saved association export</h2></header>
   <form class="workflow-form workflow-panel-body" method="post" action="{{ url_for('source_ops.queue_directory_export') }}">
@@ -104,6 +110,7 @@
     <div><button class="button button-primary" type="submit">Stage association export</button></div>
   </form>
 </section>
+{% endif %}
 
 <section class="source-panel workflow-section" aria-labelledby="sources-upload-heading">
   <header class="panel-header"><h2 id="sources-upload-heading">Upload organizations and contacts</h2></header>
