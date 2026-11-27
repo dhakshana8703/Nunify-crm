@@ -42,6 +42,29 @@ class ApolloProviderTest(unittest.TestCase):
         self.assertNotIn("local-only-reference", repr(request.header_items()))
         self.transport.assert_called_once()
 
+    def test_search_sends_multiple_titles_for_one_company_in_one_request(self):
+        self.use_response(b'''{"people": [
+            {"id": "former", "first_name": "Former", "title": "Executive Director",
+             "organization": {"primary_domain": "elsewhere.example"}},
+            {"id": "current", "first_name": "Avery", "title": "Executive Director",
+             "organization": {"primary_domain": "members.example.org"}}]}''')
+        titles = ["Director of Meetings and Events", "Executive Director"]
+        self.assertEqual(self.call(dict(self.search, titles=titles)), {
+            "credits": 0, "apollo_person_id": "current", "name": "Avery", "title": "Executive Director",
+        })
+        query = parse_qs(urlsplit(self.transport.call_args.args[0].full_url).query)
+        self.assertEqual(query["person_titles[]"], titles)
+        self.assertEqual(query["q_organization_domains_list[]"], ["example.org"])
+        self.assertEqual(query["include_similar_titles"], ["true"])
+        self.transport.assert_called_once()
+
+    def test_search_rejects_empty_or_malformed_title_lists_without_a_request(self):
+        for titles in ([], ["Head of Events", " "], [None], "Head of Events"):
+            with self.subTest(titles=titles):
+                with self.assertRaises(ValueError):
+                    self.call(dict(self.search, titles=titles))
+        self.transport.assert_not_called()
+
     def test_r1082_exact_person_unlock_preserves_fraction_and_disables_other_reveals(self):
         self.use_response(b'''{"credits_consumed": 0.125, "matches": [{"id":"person-123",
             "email": "avery@sales.example.org", "email_status": "verified",

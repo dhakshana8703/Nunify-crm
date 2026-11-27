@@ -7,7 +7,7 @@ from account_facts_store import refresh_account_facts
 from credit_ledger_store import initialize_credit_ledger
 from credit_reporting_store import credit_sum_function
 from crm_core.credit_ledger import parse_credits
-from crm_core.growth import DEFAULT_RULES, local_day
+from crm_core.growth import APOLLO_EMPTY_SEARCH, DEFAULT_RULES, local_day
 from crm_store import table_exists
 from suppression_projection import refresh_account_suppression
 from workflow_store import (
@@ -212,6 +212,17 @@ class SqlGrowthStore:
               AND (state IN ('queued', 'processing', 'failed', 'done')
                    OR EXISTS (SELECT 1 FROM credit_ledger l WHERE l.job_id = j.id))
         """, (account_id, action, person_id, person_id)).fetchone() is not None
+
+    def empty_search_job_id(self, account_id):
+        job = self.connection.execute("""
+            SELECT j.id, j.state, j.error, EXISTS (SELECT 1 FROM credit_ledger l WHERE l.job_id = j.id) AS charged
+            FROM credit_jobs j
+            WHERE j.account_id = ? AND j.action = 'people_search' AND j.person_id IS NULL
+            ORDER BY j.id DESC LIMIT 1
+        """, (account_id,)).fetchone()
+        if job and job["state"] == "done" and job["error"] == APOLLO_EMPTY_SEARCH and not job["charged"]:
+            return job["id"]
+        return None
 
     def daily_quota(self, user_id):
         return self.connection.execute("SELECT daily_credit_quota FROM users WHERE id = ?", (user_id,)).fetchone()[0]

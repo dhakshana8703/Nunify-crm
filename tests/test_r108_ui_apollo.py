@@ -86,6 +86,65 @@ class ApolloUiTest(unittest.TestCase):
             ])
             self.assertEqual(db.execute("SELECT count(*) FROM credit_ledger").fetchone()[0], 0)
 
+    def test_empty_association_search_can_be_repeated_once(self):
+        with closing(connect(self.database)) as db, transaction(db):
+            account_id = self.qualified(db, "association-search")
+            db.execute("UPDATE accounts SET organization_type = 'Association' WHERE id = ?", (account_id,))
+        self.provider.side_effect = [{"credits": 0}, self.provider.return_value]
+        seller = self.login("riya")
+        self.assertEqual(self.submit(self.login("admin"), account_id).status_code, 303)
+        with closing(connect(self.database)) as db:
+            previous = db.execute("SELECT id, error FROM credit_jobs WHERE account_id = ?", (account_id,)).fetchone()
+        page = seller.get(f"/accounts/{account_id}").data.decode()
+        self.assertIn("Search again with Apollo", page)
+        self.assertRegex(page, rf'name="previous_search_id"\s+value="{previous["id"]}"')
+        self.assertTrue({"Executive Director", "Director of Meetings"} <= set(self.provider.call_args.args[0]["titles"]))
+
+        fields = {"previous_search_id": previous["id"]}
+        self.assertEqual(self.submit(seller, account_id, **fields).status_code, 303)
+        self.assertTrue(self.submit(seller, account_id, **fields).status_code in {303, 409})
+        self.assertEqual(self.provider.call_count, 2)
+        page = seller.get(f"/accounts/{account_id}").data.decode()
+        self.assertIn("Sam Example", page)
+        self.assertNotIn("Search again with Apollo", page)
+        with closing(connect(self.database)) as db:
+            jobs = db.execute("SELECT id, state, error FROM credit_jobs WHERE account_id = ? ORDER BY id", (account_id,)).fetchall()
+            self.assertEqual(len(jobs), 2)
+            self.assertEqual(tuple(jobs[0]), (previous["id"], "done", previous["error"]))
+            self.assertEqual(jobs[1]["state"], "done")
+            roles = db.execute("""
+                SELECT u.role FROM credit_jobs j JOIN users u ON u.id = j.actor_id
+                WHERE j.account_id = ? ORDER BY j.id
+            """, (account_id,)).fetchall()
+            self.assertEqual([row["role"] for row in roles], ["admin", "sdr"])
+            self.assertEqual(db.execute("SELECT count(*) FROM credit_ledger").fetchone()[0], 0)
+
+    def test_unknown_type_search_uses_multiple_event_leadership_titles(self):
+        with closing(connect(self.database)) as db, transaction(db):
+            account_id = self.qualified(db, "unknown-type-search")
+        self.assertEqual(self.submit(self.login("riya"), account_id).status_code, 303)
+        self.provider.assert_called_once()
+        titles = set(self.provider.call_args.args[0]["titles"])
+        self.assertTrue({"Head of Events", "Event Director"} <= titles)
+
+    def test_stale_empty_result_cannot_repeat_newer_empty_search(self):
+        with closing(connect(self.database)) as db, transaction(db):
+            account_id = self.qualified(db, "repeated-empty-search")
+        self.provider.return_value = {"credits": 0}
+        seller = self.login("riya")
+        self.assertEqual(self.submit(seller, account_id).status_code, 303)
+        with closing(connect(self.database)) as db:
+            first_id = db.execute("SELECT id FROM credit_jobs WHERE account_id = ?", (account_id,)).fetchone()[0]
+        self.assertEqual(self.submit(seller, account_id, previous_search_id=first_id).status_code, 303)
+        self.assertTrue(self.submit(seller, account_id, previous_search_id=first_id).status_code in {303, 409})
+        self.assertEqual(self.provider.call_count, 2)
+        with closing(connect(self.database)) as db:
+            jobs = db.execute("SELECT id, state FROM credit_jobs WHERE account_id = ? ORDER BY id", (account_id,)).fetchall()
+            self.assertEqual([row["state"] for row in jobs], ["done", "done"])
+            self.assertEqual(db.execute("SELECT count(*) FROM credit_ledger").fetchone()[0], 0)
+        page = seller.get(f"/accounts/{account_id}").data.decode()
+        self.assertRegex(page, rf'name="previous_search_id"\s+value="{jobs[1]["id"]}"')
+
     def test_paid_unlock_requires_opt_in_and_posts_confirmed_charge_once(self):
         with closing(connect(self.database)) as db, transaction(db):
             account_id = self.qualified(db, "allowed-unlock")

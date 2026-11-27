@@ -34,7 +34,10 @@
       {% elif growth.can_approve or growth.qualification.score >= growth.auto_at %}
         <form class="workflow-form" method="post" action="{{ url_for('growth_ops.enrich', account_id=account.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit">{{ 'Find contacts with Apollo' if growth.apollo else 'Queue contact search' }}</button>
+          {% if growth.previous_search_id %}
+            <input type="hidden" name="previous_search_id" value="{{ growth.previous_search_id }}">
+          {% endif %}
+          <button type="submit">{{ 'Search again with Apollo' if growth.previous_search_id else 'Find contacts with Apollo' if growth.apollo else 'Queue contact search' }}</button>
         </form>
       {% else %}<p>Contact search requires manager approval.</p>{% endif %}
       {% if not growth.apollo or (growth.apollo.ready and growth.apollo.paid) %}

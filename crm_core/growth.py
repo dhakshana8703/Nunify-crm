@@ -36,6 +36,17 @@ DEFAULT_RULES = {
                        "agency": "Head of Production", "organizer": "Event Director",
                        "university": "Director of Conferences", "other": "Event Lead"},
 }
+APOLLO_EMPTY_SEARCH = "Apollo returned no matching contacts."
+APOLLO_PERSONA_TITLES = {
+    "association": ("Executive Director", "Chief Executive Officer", "CEO", "VP of Meetings and Events",
+                    "Director of Meetings and Events", "Director of Meetings", "VP of Education", "VP of Conferences"),
+    "corporate": ("Chief Marketing Officer", "CMO", "VP of Events", "Head of Events", "VP of Marketing",
+                  "Head of Field Marketing"),
+    "agency": ("Founder", "Managing Director", "Head of Production", "Client Services Director"),
+    "organizer": ("Chief Executive Officer", "CEO", "Event Director", "Head of Operations"),
+    "university": ("Director of Conferences", "Director of Events", "Continuing Education Director"),
+    "other": ("Event Lead", "Head of Events", "Event Director", "Director of Meetings and Events", "Director of Conferences"),
+}
 EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
@@ -82,6 +93,7 @@ class GrowthStore(Protocol):
     def restriction_for(self, account_id, person_id=None, *, candidate_email=None): ...
     def person(self, account_id, person_id): ...
     def has_credit_job(self, account_id, action, person_id): ...
+    def empty_search_job_id(self, account_id): ...
     def daily_quota(self, user_id): ...
     def replace_daily_quota(self, user_id, quota): ...
     def credit_usage(self, user_id, day): ...
@@ -286,7 +298,8 @@ def _check_enrichment_restriction(store: GrowthStore, account_id, person_id):
         raise GrowthConflict(f"{action} is blocked by suppression ({reason}).")
 
 
-def queue_enrichment(store: GrowthStore, account, person_id, user, *, observed, auto=False, manual_request=False):
+def queue_enrichment(store: GrowthStore, account, person_id, user, *, observed, auto=False, manual_request=False,
+                     previous_search_id=None):
     account_id = account["id"]
     _check_enrichment_restriction(store, account_id, person_id)
     config = store.rules()
@@ -303,7 +316,10 @@ def queue_enrichment(store: GrowthStore, account, person_id, user, *, observed, 
         if person["unlocked"]:
             return False
     action = "email_unlock" if person_id else "people_search"
-    if store.has_credit_job(account_id, action, person_id):
+    if previous_search_id is not None:
+        if person_id or store.empty_search_job_id(account_id) != previous_search_id:
+            return False
+    elif store.has_credit_job(account_id, action, person_id):
         return False
     day, budget_day = local_day(user, observed).isoformat(), utc_day(observed)
     if user["role"] == "sdr" and store.credit_usage(user["id"], day) >= store.daily_quota(user["id"]):
@@ -316,8 +332,9 @@ def queue_enrichment(store: GrowthStore, account, person_id, user, *, observed, 
     return True
 
 
-def request_enrichment(store: GrowthStore, account, person_id, user, *, observed):
-    return queue_enrichment(store, account, person_id, user, observed=observed, manual_request=True)
+def request_enrichment(store: GrowthStore, account, person_id, user, *, observed, previous_search_id=None):
+    return queue_enrichment(store, account, person_id, user, observed=observed, manual_request=True,
+                            previous_search_id=previous_search_id)
 
 
 def manual_qualification(store: GrowthStore, account, user, scorer, *, clock):
@@ -384,7 +401,11 @@ def enrich_next(store: GrowthStore, provider: EnrichmentProvider, *, clock, job_
             store.hold_credit_job(job_id, f"Suppression blocked provider delivery ({restriction}).")
             return job_id
         titles = store.rules()["persona_titles"]
-        job["title"] = titles.get(job["organization_type"].casefold(), titles["other"])
+        organization_type = job["organization_type"].casefold()
+        persona = organization_type if organization_type in titles else "other"
+        job["title"] = titles[persona]
+        if live and not person_id and persona in APOLLO_PERSONA_TITLES and job["title"] == DEFAULT_RULES["persona_titles"][persona]:
+            job["titles"] = APOLLO_PERSONA_TITLES[persona]
         job["domain"] = account["root_domain"] or account["domain"]
         if live and (not root_domain(job["domain"]) or is_platform_domain(job["domain"])):
             store.hold_credit_job(job_id, "Apollo requires a verified organization domain.")
@@ -435,7 +456,7 @@ def enrich_next(store: GrowthStore, provider: EnrichmentProvider, *, clock, job_
                 if work is None or work["stage"] in {"discovered", "qualified"}:
                     store.apply_stage(account_id, "enriched", work["revision"] if work is not None else None)
             else:
-                note = "Apollo returned no matching contacts."
+                note = APOLLO_EMPTY_SEARCH
             store.complete_credit_job(job_id, note)
     except Exception as error:
         with store.atomic():

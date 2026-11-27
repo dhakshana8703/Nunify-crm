@@ -34,3 +34,8 @@ The free Render pilot handles one explicitly submitted Apollo action within the 
 | R1-08.2c | A repeated click can resume the same queued search or an expired free-search claim owned by the requester. Staff can retry an eligible failed job from Operations. Confirmed or potentially billed jobs retain the existing reconciliation protections. |
 
 Verify these checks on disposable databases with mocked Apollo responses. Enable paid actions only after the separate live confirmation. Historical Cvent charges still require the approved charge export and statement evidence in R1-08.4.
+
+## Free search after an empty result
+
+- **R1-08.2d.** Live People Search sends the account's verified root domain and multiple P1 titles from Goutham's organization personas. For associations, use leadership, meetings, events, education and conference roles. Use event leadership titles when the organization type is unknown. Retain explicitly configured title selections and the offline simulation's existing title. A verified match remains scoped to the same company, and a free search records zero credits.
+- **R1-08.2e.** The account page offers **Search again with Apollo** after its latest free search completed without a usable contact. The action references that empty result, creates one new search per submitted result, and preserves the previous job. A stale click, an active search, a charged job or an email unlock cannot become a new search through this form. Apply the existing eligibility, account scope and suppression rules. Verify with a stale duplicate form, a matching response following an empty response, and the existing unlock safeguards.

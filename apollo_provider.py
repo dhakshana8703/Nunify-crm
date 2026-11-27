@@ -38,7 +38,7 @@ class ApolloProvider:
         self._transport = transport if transport is not None else build_opener(_NoRedirects()).open
 
     def _post(self, endpoint, *, params, payload=None):
-        request = Request(f"https://api.apollo.io/api/v1/{endpoint}?{urlencode(params)}",
+        request = Request(f"https://api.apollo.io/api/v1/{endpoint}?{urlencode(params, doseq=True)}",
                           data=json.dumps(payload).encode("utf-8") if payload is not None else None,
                           headers={"X-Api-Key": self._key, "Accept": "application/json",
                                    "Content-Type": "application/json", "Cache-Control": "no-cache"},
@@ -68,16 +68,21 @@ class ApolloProvider:
         if not domain or is_platform_domain(host):
             raise ValueError("A verified company domain is required for Apollo.")
         if job["action"] == "people_search":
-            return self._search(domain, text_value(job.get("title")))
+            return self._search(domain, job.get("titles", (job.get("title"),)), include_similar="titles" in job)
         if job["action"] == "email_unlock":
             return self._unlock(domain, text_value(job.get("apollo_person_id")))
         raise ValueError("This Apollo action is unavailable.")
 
-    def _search(self, domain, title):
-        if not title:
-            raise ValueError("A job title is required for Apollo people search.")
-        result = self._post("mixed_people/api_search", params={"q_organization_domains_list[]": domain,
-                                                              "person_titles[]": title, "per_page": 10})
+    def _search(self, domain, titles, *, include_similar):
+        if not isinstance(titles, (tuple, list)):
+            raise ValueError("Provide job titles as a list for Apollo people search.")
+        titles = tuple(dict.fromkeys(text_value(title) for title in titles))
+        if not titles or "" in titles or len(titles) >= 100:
+            raise ValueError("Provide one to 99 nonempty job titles for Apollo people search.")
+        params = {"q_organization_domains_list[]": domain, "person_titles[]": titles, "per_page": 10}
+        if include_similar:
+            params["include_similar_titles"] = "true"
+        result = self._post("mixed_people/api_search", params=params)
         people = result.get("people")
         if not isinstance(people, list):
             raise ApolloResponseError("Apollo did not return a candidate list.")
@@ -89,8 +94,9 @@ class ApolloProvider:
                 text_value(person.get("first_name")), text_value(person.get("last_name_obfuscated")),
             )))
             if person_id and name:
+                fallback_title = titles[0] if len(titles) == 1 else ""
                 return {"credits": 0, "apollo_person_id": person_id, "name": name,
-                        "title": text_value(person.get("title")) or title}
+                        "title": text_value(person.get("title")) or fallback_title}
         return {"credits": 0}
 
     def _unlock(self, domain, person_id):

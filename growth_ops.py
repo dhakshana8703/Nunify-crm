@@ -135,10 +135,12 @@ def account_context(connection, account_id, user):
     store = SqlGrowthStore(connection)
     qualification = store.qualification(account_id)
     config = store.rules()
+    apollo = apollo_web_status()
     return {
         "qualification": dict(qualification, signals=json.loads(qualification["signals"])) if qualification else None,
         "jobs": store.account_jobs(account_id),
-        "apollo": apollo_web_status(),
+        "apollo": apollo,
+        "previous_search_id": store.empty_search_job_id(account_id) if apollo and apollo["ready"] else None,
         **account_credit_access(store, user, qualification, config, observed=now() if user["role"] == "sdr" else None),
     }
 
@@ -249,12 +251,18 @@ def enrich(account_id):
     person_id = request.form.get("person_id", type=int)
     if "person_id" in request.form and (person_id is None or person_id <= 0):
         abort(400, "Choose a contact for email unlock.")
+    previous_search_id = request.form.get("previous_search_id", type=int)
+    if "previous_search_id" in request.form and (person_id or not previous_search_id or previous_search_id < 0):
+        abort(400, "Choose a previous empty search to run again.")
     store = SqlGrowthStore(db())
     with _errors(), store.atomic():
         account = account_required(account_id, write=True)
         provider = web_enrichment_provider(person_id)
+        if previous_search_id is not None and provider is None:
+            abort(403, "Apollo must be configured to repeat a search.")
         observed = now()
-        queued = request_enrichment(store, account, person_id, user, observed=observed)
+        queued = request_enrichment(store, account, person_id, user, observed=observed,
+                                    previous_search_id=previous_search_id)
         job_id = store.requested_credit_job_id(account_id, person_id, user["id"], observed) if provider else None
     if job_id is not None:
         enrich_next(store, provider, clock=now, job_id=job_id)
