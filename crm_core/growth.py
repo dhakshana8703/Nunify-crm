@@ -9,8 +9,10 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from crm_core.access import STAFF
+from crm_core.credit_ledger import parse_credits
 from crm_core.suppression import normalize_domain_rule
 from crm_core.suppression_metadata import REASON_CODES
+from organization_identity import is_platform_domain, root_domain
 
 QUALIFICATION_SCOPES = {
     "all": "All saved-source accounts", "cvent": "Cvent",
@@ -85,14 +87,14 @@ class GrowthStore(Protocol):
     def credit_usage(self, user_id, day): ...
     def auto_usage(self, day): ...
     def reserve_credit_job(self, job): ...
-    def claimable_credit_jobs(self, observed): ...
+    def claimable_credit_jobs(self, observed, *, job_id=None): ...
     def hold_credit_job(self, job_id, reason, *, release=False): ...
-    def claim_credit_job(self, job, token, expires_at): ...
+    def claim_credit_job(self, job, token, expires_at, *, may_spend=False): ...
     def owns_credit_job(self, job_id, token): ...
-    def charge_credit(self, job, observed): ...
-    def save_unlocked_email(self, person_id, email): ...
-    def save_enriched_contact(self, account_id, name, title): ...
-    def complete_credit_job(self, job_id): ...
+    def charge_credit(self, job, observed, credits=1, *, confirmed=False): ...
+    def save_unlocked_email(self, person_id, email, *, verified=True): ...
+    def save_enriched_contact(self, account_id, name, title, *, apollo_person_id=None): ...
+    def complete_credit_job(self, job_id, note=None): ...
     def fail_credit_job(self, job_id, token, reason): ...
     def credit_job(self, job_id): ...
     def retry_credit_job(self, job_id): ...
@@ -296,7 +298,7 @@ def queue_enrichment(store: GrowthStore, account, person_id, user, *, observed, 
         raise GrowthConflict("Qualify the account before using enrichment credits.")
     if person_id:
         person = store.person(account_id, person_id)
-        if not person or person["origin"] != "apollo_offline":
+        if not person or not (person["origin"] == "apollo_offline" or person["apollo_person_id"]):
             raise GrowthConflict("Choose a contact returned by the enrichment provider.")
         if person["unlocked"]:
             return False
@@ -335,15 +337,19 @@ def retry_enrichment(store: GrowthStore, user, job_id, observed):
     job = store.credit_job(job_id)
     if not job or job["state"] != "failed":
         raise GrowthConflict("Only a failed job can be retried.")
+    if job["reconciliation_required"]:
+        raise GrowthConflict("Apollo credit usage requires reconciliation before this job can be retried.")
     _check_enrichment_restriction(store, job["account_id"], job["person_id"])
     store.retry_credit_job(job_id)
     store.audit(user["id"], job["account_id"], "credit_retry", {"job_id": job_id}, observed)
 
 
-def select_credit_job(store: GrowthStore, observed):
+def select_credit_job(store: GrowthStore, observed, *, live=False, job_id=None):
     config = store.rules()
-    for row in store.claimable_credit_jobs(observed):
+    for row in store.claimable_credit_jobs(observed, job_id=job_id):
         job = dict(row)
+        if not live and job["apollo_person_id"]:
+            continue
         if job["attempts"] == 0:
             actor_day, budget_day = local_day(job, observed).isoformat(), utc_day(observed)
             if (job["role"] == "sdr" and actor_day != job["on_day"]
@@ -357,10 +363,11 @@ def select_credit_job(store: GrowthStore, observed):
     return None
 
 
-def enrich_next(store: GrowthStore, provider: EnrichmentProvider, *, clock):
+def enrich_next(store: GrowthStore, provider: EnrichmentProvider, *, clock, job_id=None):
+    live = getattr(provider, "requires_confirmation", False) is True
     with store.atomic():
         observed = clock()
-        job = select_credit_job(store, observed)
+        job = select_credit_job(store, observed, live=live, job_id=job_id)
         if not job:
             return None
         job_id, account_id, person_id = job["id"], job["account_id"], job["person_id"]
@@ -378,34 +385,65 @@ def enrich_next(store: GrowthStore, provider: EnrichmentProvider, *, clock):
             return job_id
         titles = store.rules()["persona_titles"]
         job["title"] = titles.get(job["organization_type"].casefold(), titles["other"])
+        job["domain"] = account["root_domain"] or account["domain"]
+        if live and (not root_domain(job["domain"]) or is_platform_domain(job["domain"])):
+            store.hold_credit_job(job_id, "Apollo requires a verified organization domain.")
+            return job_id
+        if live and person_id and not job["apollo_person_id"]:
+            store.hold_credit_job(job_id, "Email unlock requires a saved Apollo person ID.")
+            return job_id
         token = uuid4().hex
-        store.claim_credit_job(job, token, observed + timedelta(minutes=2))
+        store.claim_credit_job(job, token, observed + timedelta(minutes=2), may_spend=live and bool(person_id))
 
     try:
         result = provider(job, idempotency_key=job["request_key"])
+        if live:
+            credits = parse_credits(result.get("credits"))
+            if credits < 0 or (not person_id and credits):
+                raise GrowthInvalid("The Apollo credit confirmation is invalid.")
+            with store.atomic():
+                if not store.owns_credit_job(job_id, token):
+                    return job_id
+                if credits:
+                    store.charge_credit(job, clock(), credits, confirmed=True)
         with store.atomic():
             if not store.owns_credit_job(job_id, token):
                 return job_id
-            store.charge_credit(job, clock())
+            if not live:
+                store.charge_credit(job, clock())
             restriction = store.restriction_for(account_id, person_id, candidate_email=result.get("email"))
             if restriction:
                 store.hold_credit_job(job_id, f"Suppression blocked publishing the enrichment result ({restriction}).",
                                       release=True)
                 return job_id
+            note = None
             if person_id:
-                store.save_unlocked_email(person_id, result["email"])
-            else:
+                if not live or result.get("email"):
+                    store.save_unlocked_email(person_id, result["email"], verified=(
+                        not live or result.get("email_verified") is True
+                    ))
+                else:
+                    note = "Apollo returned no verified company email."
+            elif not live or result.get("apollo_person_id"):
                 name, title = result["name"], result["title"]
                 if not isinstance(name, str) or not name.strip() or not isinstance(title, str):
                     raise GrowthInvalid("The enrichment provider returned an invalid contact.")
-                store.save_enriched_contact(account_id, name, title)
+                store.save_enriched_contact(account_id, name, title, apollo_person_id=(
+                    result.get("apollo_person_id") if live else None
+                ))
                 work = store.work_state(account_id)
                 if work is None or work["stage"] in {"discovered", "qualified"}:
                     store.apply_stage(account_id, "enriched", work["revision"] if work is not None else None)
-            store.complete_credit_job(job_id)
+            else:
+                note = "Apollo returned no matching contacts."
+            store.complete_credit_job(job_id, note)
     except Exception as error:
         with store.atomic():
-            store.fail_credit_job(job_id, token, f"Provider result pending reconciliation ({type(error).__name__}).")
+            if not live:
+                message = "Provider result pending reconciliation"
+            else:
+                message = "Apollo credit usage or result needs reconciliation" if person_id else "Apollo search failed"
+            store.fail_credit_job(job_id, token, f"{message} ({type(error).__name__}).")
     return job_id
 
 

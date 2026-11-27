@@ -87,6 +87,15 @@
     {% endif %}
 
     <main class="main-content" id="main-content">
+      {% if credit_overview is defined and credit_overview is not none %}
+        <header class="workspace-credit-header">
+          {% if credit_overview.scope == 'team' %}
+            <a class="credit-badge" href="{{ url_for('growth_ops.index', _anchor='team-credits') }}">Apollo credits <strong id="credit-header-total">{{ credit_overview.total|credit_amount }}</strong></a>
+          {% else %}
+            <span class="credit-badge">My Apollo credits <strong id="credit-header-total">{{ credit_overview.total|credit_amount }}</strong></span>
+          {% endif %}
+        </header>
+      {% endif %}
       {% for category, message in get_flashed_messages(with_categories=true) %}
         <div class="workflow-notice{% if category in ('error', 'danger') %} is-error{% endif %}" role="status">{{ message }}</div>
       {% endfor %}

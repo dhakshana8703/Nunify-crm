@@ -13,6 +13,7 @@ import account_merges_web
 import account_names
 import account_profile
 import campaigns
+import credit_reporting_web
 import growth_ops
 import sales_extensions
 import scraper_ingest
@@ -67,9 +68,11 @@ def create_app(database_path=None, *, demo=False):
     app.register_blueprint(scraper_ingest.bp)
     app.register_blueprint(source_review.bp)
     app.register_blueprint(growth_ops.bp)
+    app.register_blueprint(credit_reporting_web.bp)
     app.register_blueprint(campaigns.bp)
     app.before_request(workflow_web.authenticate_request)
     app.jinja_env.globals.update(csrf_token=workflow_web.csrf_token, view_endpoints=app.view_functions)
+    app.jinja_env.filters["credit_amount"] = credit_reporting_web.credit_amount
 
     db = workflow_web.db
 
@@ -98,6 +101,7 @@ def create_app(database_path=None, *, demo=False):
         user = g.get("crm_user")
         return {
             "current_user": user,
+            "credit_overview": credit_reporting_web.workspace_credits(),
             "accounts": workflow_web.readable_accounts()[:8] if user and user["role"] == "sdr" else [],
             "review_count": unlinked_source_count(db()) if user and user["role"] in workflow_web.STAFF else None,
         }

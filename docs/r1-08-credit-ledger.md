@@ -1,0 +1,36 @@
+# R1-08 Single Apollo credit ledger
+
+[Goutham's story](stories/01_R1a_prerequisites.md#r1-08-single-credit-ledger-migration) specifies five acceptance checks. Verify the ledger on SQLite and disposable PostgreSQL, with mocked Apollo transport and no live spending.
+
+| Check | Behavior | Verification |
+| --- | --- | --- |
+| R1-08.1 | Preserve existing ledger IDs and job links on upgrade. Accept organization match, people search, email unlock, phone unlock and a signed opening balance adjustment. Store source and stable posting reference. History may lack an independently verified company, contact or user link. | Upgrade and reopen a pre-change store. Check foreign keys, supported actions, decimal amounts and uniqueness. |
+| R1-08.2 | Record each confirmed nonzero charge once, including when new suppression blocks publication. A zero charge adds no paid posting. An uncertain paid request is held for reconciliation and cannot be automatically sent again, including after a lease expires. An explicitly chosen Apollo worker uses actual response amounts. | Test no match, free search, fractional and duplicate charges, a lost response, late success, a new suppression rule, publication failure, restart and retry. Prove the default offline worker with a saved key makes zero network requests. |
+| R1-08.3 | The header, the Operations credit stat and the team view share one confirmed ledger total. Exclude synthetic offline postings from Apollo spend. Show historical credits without an identified owner in that total and separate them from attributed team totals. | Render real screens with the same fixture containing confirmed, historical, adjusted and offline postings. Compare totals and role access. |
+| R1-08.4 | Preview a verified Cvent charge export and explicit reference mappings before an Admin applies it. Keep original source references and times. Positive confirmed source postings link only to verified IDs. Record a reconciled statement difference as at most one signed opening adjustment. Applying the same input twice adds zero. Conflicting replay or stale preview stops apply. | Use fixture exports with duplicate IDs, conflicting records, unlinked identities, fractional amounts, both directions of adjustment, and a late failure. Actual legacy history requires verified source and statement evidence. |
+| R1-08.5 | Expose confirmed daily ledger totals by active user and date to the user and authorized staff, using the recorded account of the user's local day. Queue reservations are separate from confirmed spend. | Check the same posting on either side of midnight, historical unattributed amounts, own access, staff access and peer denial. |
+
+## Provider and accounting decisions
+
+- Mark prior Nunify postings as offline fixtures. Actual Cvent charges enter through the verified historical import. Existing offline workflow and quota tests retain their simulation behavior.
+- The live adapter supports the existing people-search and email-unlock job paths. Apollo's people search is free. A single-person bulk match with waterfall and phone reveal disabled returns an explicit `credits_consumed` amount, including fractional usage. Reserve a durable settlement hold before a live lookup that may charge credits. A provider-wide usage snapshot can support reconciliation and cannot identify a specific charge on its own. Ledger actions for organization and phone records are covered by the posting and import rules. See [Apollo people search](https://docs.apollo.io/reference/people-api-search), [bulk enrichment](https://docs.apollo.io/reference/bulk-people-enrichment) and [credit usage stats](https://docs.apollo.io/reference/view-credit-usage-stats).
+- Use decimal amounts up to six decimal places and bounded magnitude. Keep exact references and guard single posting per job or imported charge. Perform settlement before publishing live results so a verified charge survives a later publishing failure. Account merge previews must accept decimal credit history and prevent ambiguous Apollo identities from being merged into one account.
+- A search reuses a saved Cvent contact when the Apollo person ID and CRM account match. The existing unlocked email, suppression and contact history stay linked to that record.
+
+## Verification inputs and operating scope
+
+- Run the worker with `--offline` for simulations. Live operation uses `--live-apollo` and `APOLLO_API_KEY` in the worker environment. This flag can drain all eligible queued lookups. Test with a disposable single-request queue. Awaiting or incomplete paid jobs stay held for operator review, including after a restart. Provider setup, deployment and paid verification require separate authorization.
+- The historical CLI requires a verified charge CSV and a statement JSON with its reference, approved historical-only total and cutoff time. Use an approved user map for any attributed legacy owners. Preview reviews identity mappings and the adjustment, and apply requires a current preview fingerprint and an active Admin. The record of the cutover preserves its evidence reference even when the adjustment is zero.
+- `GET /api/credits/daily?user_id=2&date=2026-11-27` returns `user_id`, `date` and `credits` as a decimal string. With no parameters it uses the signed-in user and their local date. Admins can query active users, Managers can query themselves and active SDRs, and SDRs can query themselves.
+
+## Hosted account actions
+
+The free Render pilot handles one explicitly submitted Apollo action within the web request. It reserves and commits the job first, runs the existing enrichment service for that job ID, then redirects to the result. Processing one account action cannot drain other queued jobs. Connector schedules and bulk qualification continue to use the existing worker. This keeps the pilot on its existing web service and preserves the same job and ledger when a dedicated worker is used later.
+
+| Check | Observable result |
+| --- | --- |
+| R1-08.2a | With the hosted Apollo key configured, an authorized user selects **Find contacts with Apollo** on an eligible account, and the response shows the resulting search state. The search records no charge and leaves other queued jobs untouched. Without a key the hosted web app shows that Apollo setup is needed. |
+| R1-08.2b | Email unlock is enabled only with `CRM_APOLLO_ALLOW_PAID=1`. With it enabled, an explicit UI unlock for a saved provider candidate posts the confirmed charge once and shows a verified work email when available. Without it, the UI and server both deny the paid request. A repeated submission, unauthorized or suppressed account, and uncertain paid response cannot trigger a second charge. |
+| R1-08.2c | A repeated click can resume the same queued search or an expired free-search claim owned by the requester. Staff can retry an eligible failed job from Operations. Confirmed or potentially billed jobs retain the existing reconciliation protections. |
+
+Verify these checks on disposable databases with mocked Apollo responses. Enable paid actions only after the separate live confirmation. Historical Cvent charges still require the approved charge export and statement evidence in R1-08.4.

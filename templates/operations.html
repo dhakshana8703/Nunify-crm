@@ -4,13 +4,24 @@
 {% block content %}
   <header class="page-header">
     <h1>Operations</h1>
-    <p>{{ credits }} demo enrichment credits recorded</p>
     {% if last_worker_pass %}
       <p>Last completed worker pass <time datetime="{{ last_worker_pass }}">{{ last_worker_pass[:16]|replace('T', ' ') }} UTC</time></p>
     {% else %}
       <p>No worker pass recorded.</p>
     {% endif %}
   </header>
+  <section class="source-panel workflow-panel" aria-labelledby="apollo-credits-heading">
+    <header class="panel-header"><h2 id="apollo-credits-heading">Apollo credits</h2></header>
+    <div class="workflow-panel-body">
+      {% if apollo %}
+        <p>{% if not apollo.ready %}Apollo needs to be configured for this CRM.{% elif apollo.paid %}Contact search and paid email unlock are enabled.{% else %}Free contact search is enabled. Paid email unlock is disabled.{% endif %}</p>
+      {% endif %}
+      <dl class="assignment-details">
+        <div><dt>Confirmed credits</dt><dd id="credit-operations-total">{{ credit_overview.total|credit_amount }}</dd></div>
+      </dl>
+    </div>
+  </section>
+  {% include 'credit_team.html' %}
   <section class="source-panel workflow-panel">
     <header class="panel-header"><h2>Account coverage</h2></header>
     <div class="workflow-panel-body">
@@ -46,8 +57,8 @@
         {% for row in funnel %}
           <li><strong>{{ row.source_name }}</strong> - {{ row.discovered }} discovered, {{ row.scored }} scored,
             {{ row.assigned }} assigned, {{ row.worked }} worked, {{ row.positive }} positive,
-            {{ row.delivered }} delivered, {{ row.credits }} credits
-            {% if row.positive %} ({{ (row.credits / row.positive)|round(2) }} per positive){% endif %}
+            {{ row.delivered }} delivered, {{ row.credits|credit_amount }} credits
+            {% if row.positive %} ({{ (row.credits / row.positive)|round(2)|credit_amount }} per positive){% endif %}
           </li>
         {% else %}<li>No linked source data.</li>{% endfor %}
       </ul>
@@ -118,12 +129,16 @@
     <ul class="workflow-list workflow-panel-body">
       {% for item in items %}
         <li><a class="text-link" href="{{ url_for('account_detail', account_id=item.account_id) }}">{{ item.name }}</a>
-          {{ item.action|replace('_', ' ') }} - {{ item.state }} · {{ item.actor }}
-          {% if item.state == 'failed' %}
+          {{ item.action|replace('_', ' ') }} - {{ 'Needs reconciliation' if item.reconciliation_required else item.state }} · {{ item.actor }}
+          {% if item.reconciliation_required %}
+            <p>{{ item.error or 'This Apollo request may have spent credits. Verify the provider result before retrying.' }}</p>
+          {% elif item.state == 'failed' %}
             <p>{{ item.error }}</p>
+            {% if not apollo or (apollo.ready and (item.action != 'email_unlock' or apollo.paid)) %}
             <form class="workflow-form" method="post" action="{{ url_for('growth_ops.retry', job_id=item.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Retry</button>
             </form>
+            {% endif %}
           {% endif %}
         </li>
       {% else %}<li>No enrichment jobs match.</li>{% endfor %}

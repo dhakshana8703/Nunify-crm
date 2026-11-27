@@ -51,6 +51,13 @@ In Render's **Environment** settings, set `DATABASE_URL` to the direct Neon conn
 
 The first start creates the admin, manager, and Riya sign-ins and adds **Pilot Association** to an empty account list. Set the additional password variables to create separate logins for Arjun, Neha, and Kavya. Each active SDR appears in the manager's assignment dropdown. An earlier pilot's test sign-ins are renamed in place, preserving users' assignments and history. Updated environment passwords take effect on deployment. Assign the sample company to an SDR, save a simulated call with **Use tomorrow**, then redeploy and check the saved follow-up. The pilot starts the web app. Source jobs need a worker, and saved local CRM data needs a separate migration.
 
+### Apollo contact search and email unlock
+
+In the existing Render web service, set `APOLLO_API_KEY` in **Environment** to enable live contact search. Leave `CRM_APOLLO_ALLOW_PAID` unset for a free demo. Set `CRM_APOLLO_ALLOW_PAID=1` only after credit spending is approved. The web service processes the single job submitted from the account. Source imports and bulk processing continue to use the separate worker.
+
+1. Open an eligible account and select **Qualification**, then **Find contacts with Apollo**. Review the search status and any matches under **Contacts**. This search uses zero Apollo credits.
+2. With paid actions enabled, select **Unlock** next to a saved Apollo candidate to request their verified work email. A confirmed charge appears under **Operations → Apollo credits**. [R1-08 credit ledger](docs/r1-08-credit-ledger.md)
+
 ### Transfer the prepared companies and contacts once
 
 After the hosted CRM is running, set strong passwords for its users before adding real contacts. From the `nunify-crm` folder on the computer with the saved local CRM, run a preview:

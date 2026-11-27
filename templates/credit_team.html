@@ -1,0 +1,14 @@
+<section class="source-panel workflow-panel" id="team-credits" aria-labelledby="team-credits-heading">
+  <header class="panel-header"><h2 id="team-credits-heading">Team credits</h2></header>
+  <div class="workflow-panel-body">
+    <p><strong id="credit-team-total">{{ credit_overview.total|credit_amount }}</strong> Apollo credits total</p>
+    <ul class="workflow-list">
+      {% for row in credit_overview.users %}
+        <li><strong>{{ row.name }}</strong>{% if not row.active %} (inactive){% endif %} - {{ row.credits|credit_amount }} credits</li>
+      {% else %}
+        <li>No attributed Apollo credits.</li>
+      {% endfor %}
+      <li>Unattributed history and adjustments - {{ credit_overview.unattributed|credit_amount }} credits</li>
+    </ul>
+  </div>
+</section>

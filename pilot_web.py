@@ -6,6 +6,7 @@ from contextlib import closing
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from account_store import SqlPilotUsers
+from apollo_provider import ApolloProvider
 from app import create_app
 from crm_core.pilot import PilotSignIn, provision_pilot_users
 from crm_store import configured_database, connect, has_accounts, import_snapshot, is_postgres
@@ -44,6 +45,12 @@ def create_pilot_app():
         raise ValueError("Set CRM_SECRET_KEY for the hosted pilot.")
 
     app = create_app(database)
+    apollo_key = os.environ.get("APOLLO_API_KEY", "").strip()
+    app.config.update(
+        APOLLO_WEB_ENABLED=True,
+        APOLLO_PROVIDER=ApolloProvider(apollo_key) if apollo_key else None,
+        APOLLO_ALLOW_PAID=os.environ.get("CRM_APOLLO_ALLOW_PAID") == "1",
+    )
     with closing(connect(database)) as connection:
         configure_pilot_users(connection)
         existing_accounts = has_accounts(connection)

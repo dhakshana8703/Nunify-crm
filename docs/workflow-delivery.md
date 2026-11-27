@@ -233,25 +233,25 @@ The local acceptance checks and the 50-test PostgreSQL fixture rehearsal on the 
 
 ##### R1-08 Single credit ledger [migration]
 
-- [ ] Table `credit_ledger` (id, user_id, account_id, person_id, action: org_match / people_search / email_unlock / phone_unlock, credits, at)
+- [x] Table `credit_ledger` (id, user_id, account_id, person_id, action: org_match / people_search / email_unlock / phone_unlock, credits, at)
 
-  **Partial.** A transactional credit ledger carries user, account, person, credits and time. Its supported provider actions are narrower than the original. (Original line 93.)
+  **Verified on disposable SQLite and PostgreSQL.** The upgrade preserves ledger IDs and job references. It supports all four action codes, decimal charges and one signed reconciliation adjustment. (Original line 93.)
 
 - [ ] Every Apollo call that spends credits writes exactly one ledger row
 
-  **Partial.** Offline provider tests verify guarded, single ledger writes on retry. The live Apollo charging path is pending. (Original line 94.)
+  **Verified with provider doubles.** An explicit live adapter and the worker record a confirmed deduction once, including when publication is suppressed or fails. Uncertain paid jobs stay held across restart. Live Apollo response verification remains pending. (Original line 94.)
 
-- [ ] Header badge, stats card and Team screen all read from the ledger (fixes the 62 vs 66 mismatch)
+- [x] Header badge, stats card and Team screen all read from the ledger (fixes the 62 vs 66 mismatch)
 
-  **Partial.** Operations reads the ledger and quota logic uses it. Equal header, stats card and Team totals on the deployed data are unverified. (Original line 95.)
+  **Verified with saved fixtures.** The signed-in header, Operations and Team queue share one confirmed total and show unattributed credits. The historically correct hosted balance depends on the reviewed import. (Original line 95.)
 
 - [ ] Historical credits migrated; any unreconcilable difference recorded as a single "opening balance adjustment" row
 
-  **Open.** Historical Neon transactions are inventoried. Verified charge reconciliation, opening balance and historical postings are pending. (Original line 96.)
+  **Importer verified on both engines.** Admin preview and apply preserve source references, enforce one signed adjustment, and reject stale or conflicting inputs. The actual historical migration depends on a verified charge export and approved statement total and cutoff. (Original line 96.)
 
-- [ ] Per-user daily credit total available via API (used in R2 quotas)
+- [x] Per-user daily credit total available via API (used in R2 quotas)
 
-  **Partial.** Quotas use the internal per-user daily ledger total with a local midnight reset. There is no dedicated per-user daily totals API. (Original line 97.)
+  **Verified with saved fixtures.** The role-scoped daily endpoint returns confirmed credits for the user's recorded local date. Quota reservations remain separate from confirmed spend. (Original line 97.)
 
 ##### Release 1a demo checklist
 

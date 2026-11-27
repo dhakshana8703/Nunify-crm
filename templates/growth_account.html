@@ -4,7 +4,7 @@
     {% if growth.qualification %}<span class="count-tag">{{ growth.qualification.score }} points</span>{% endif %}
   </header>
   <div class="workflow-panel-body">
-    {% if growth.remaining is not none %}<p>{{ growth.remaining }} demo credits available today.</p>{% endif %}
+    {% if growth.remaining is not none %}<p>{{ growth.remaining }} credits available in your daily quota.</p>{% endif %}
     {% if growth.qualification %}
       <p>Reviewed <time datetime="{{ growth.qualification.observed_at }}">{{ growth.qualification.observed_at[:10] }}</time></p>
       <ul class="workflow-list">
@@ -29,27 +29,32 @@
       </details>
     {% endif %}
     {% if growth.can_enrich and work.can_work and not work.blocked %}
-      {% if growth.can_approve or growth.qualification.score >= growth.auto_at %}
+      {% if growth.apollo and not growth.apollo.ready %}
+        <p>Apollo needs to be configured for this CRM.</p>
+      {% elif growth.can_approve or growth.qualification.score >= growth.auto_at %}
         <form class="workflow-form" method="post" action="{{ url_for('growth_ops.enrich', account_id=account.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit">Queue contact search</button>
+          <button type="submit">{{ 'Find contacts with Apollo' if growth.apollo else 'Queue contact search' }}</button>
         </form>
       {% else %}<p>Contact search requires manager approval.</p>{% endif %}
-      {% for contact in contacts if contact.origin == 'apollo_offline' and not contact.unlocked and not contact.blocked %}
-        <form class="workflow-form" method="post" action="{{ url_for('growth_ops.enrich', account_id=account.id) }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="person_id" value="{{ contact.id }}">
-          <button type="submit">Unlock {{ contact.name }}</button>
-        </form>
-      {% endfor %}
+      {% if not growth.apollo or (growth.apollo.ready and growth.apollo.paid) %}
+        {% for contact in contacts if (contact.apollo_person_id or (not growth.apollo and contact.origin == 'apollo_offline')) and not contact.unlocked and not contact.blocked %}
+          <form class="workflow-form" method="post" action="{{ url_for('growth_ops.enrich', account_id=account.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="person_id" value="{{ contact.id }}">
+            <button type="submit">Unlock {{ contact.name }}</button>
+          </form>
+        {% endfor %}
+      {% elif growth.apollo.ready %}
+        <p>Paid Apollo email unlock is disabled.</p>
+      {% endif %}
     {% endif %}
     {% if growth.jobs %}
       <ul class="workflow-list">
         {% for job in growth.jobs %}
-          <li>{{ job.action|replace('_', ' ')|capitalize }} - {{ job.state|capitalize }}{% if job.error %}. {{ job.error }}{% endif %}</li>
+          <li>{{ job.action|replace('_', ' ')|capitalize }} - {{ 'Needs reconciliation' if job.reconciliation_required else job.state|capitalize }}{% if job.error %}. {{ job.error }}{% endif %}</li>
         {% endfor %}
       </ul>
     {% endif %}
-    <p class="workflow-item-meta">Apollo connection pending. The local worker uses synthetic responses.</p>
   </div>
 </section>

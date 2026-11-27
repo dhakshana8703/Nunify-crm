@@ -1,6 +1,7 @@
-"""Run development jobs against saved inputs and offline provider adapters."""
+"""Run CRM jobs with explicitly selected enrichment providers."""
 
 import argparse
+import os
 import sqlite3
 import time
 from contextlib import closing
@@ -20,11 +21,11 @@ from source_run_store import initialize as initialize_sources
 from source_worker_service import work_one as process_source_run
 
 
-def run_pass(connection, cvent_dir, directory_dir, *, connectors=None):
+def run_pass(connection, cvent_dir, directory_dir, *, connectors=None, apollo=None):
     clock = workflow_store.utcnow
     growth = SqlGrowthStore(connection)
     handoff = deliver_pending_handoff(SqlHandoffStore(connection), OfflineAEProvider(connection), clock=clock)
-    credit = enrich_next(growth, OfflineApollo(), clock=clock)
+    credit = enrich_next(growth, apollo if apollo is not None else OfflineApollo(), clock=clock)
     sources = process_source_run(connection, cvent_dir=cvent_dir, directory_dir=directory_dir, connectors=connectors,
                                  clock=clock)
     qualification = run_qualification_batch(growth, partial(score_qualification, growth), clock=clock,
@@ -38,9 +39,19 @@ def main():
     parser.add_argument("--db", help="SQLite file or PostgreSQL URL. Defaults to DATABASE_URL when set.")
     parser.add_argument("--cvent-dir", type=Path, default=CVENT_DIR)
     parser.add_argument("--directory-dir", type=Path, default=DIRECTORY_DIR)
-    parser.add_argument("--offline", action="store_true", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--offline", action="store_true", help="Use simulated provider responses.")
+    mode.add_argument("--live-apollo", action="store_true", help="Allow real Apollo lookups and credit usage.")
     parser.add_argument("--once", action="store_true", help="Drain current jobs and exit.")
     args = parser.parse_args()
+    apollo = None
+    if args.live_apollo:
+        from apollo_provider import ApolloProvider
+
+        key = os.environ.get("APOLLO_API_KEY", "").strip()
+        if not key:
+            parser.error("Set APOLLO_API_KEY for --live-apollo.")
+        apollo = ApolloProvider(key)
     database = args.db or configured_database()
     connectors = configured_saved_exports(cvent_dir=args.cvent_dir, directory_dir=args.directory_dir)
     initialize(database)
@@ -54,7 +65,7 @@ def main():
         while True:
             try:
                 handoff, credit, sources, qualification = run_pass(
-                    connection, args.cvent_dir, args.directory_dir, connectors=connectors,
+                    connection, args.cvent_dir, args.directory_dir, connectors=connectors, apollo=apollo,
                 )
                 observed_at = time.monotonic()
                 if observed_at >= next_status_update:

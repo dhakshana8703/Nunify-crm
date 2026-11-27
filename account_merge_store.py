@@ -49,7 +49,11 @@ class SqlAccountMergeStore:
             rows = self.connection.execute(
                 f"SELECT {fields} FROM {source} WHERE r.account_id IN (SELECT value FROM json_each(?))", parameters,
             )
-            history[table] = sorted(map(dict, rows), key=lambda row: json.dumps(row, sort_keys=True))
+            records = [dict(row) for row in rows]
+            if table == "credit_ledger":
+                for row in records:
+                    row["credits"] = str(row["credits"])
+            history[table] = sorted(records, key=lambda row: json.dumps(row, sort_keys=True))
         return history
 
     def actor(self, actor_id):

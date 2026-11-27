@@ -1,4 +1,4 @@
-"""Flask adapters for offline qualification and credit-controlled enrichment."""
+"""Flask adapters for qualification and credit-controlled enrichment."""
 
 import csv
 import io
@@ -113,6 +113,24 @@ def enrich_one(connection, provider, *, clock=utcnow):
     return enrich_next(SqlGrowthStore(connection), provider, clock=clock)
 
 
+def apollo_web_status():
+    if not current_app.config.get("APOLLO_WEB_ENABLED"):
+        return None
+    return {"ready": current_app.config.get("APOLLO_PROVIDER") is not None,
+            "paid": current_app.config.get("APOLLO_ALLOW_PAID", False)}
+
+
+def web_enrichment_provider(person_id):
+    status = apollo_web_status()
+    if status is None:
+        return None
+    if person_id and not status["paid"]:
+        abort(403, "Paid Apollo email unlock is disabled.")
+    if not status["ready"]:
+        abort(503, "Apollo needs to be configured for this CRM.")
+    return current_app.config["APOLLO_PROVIDER"]
+
+
 def account_context(connection, account_id, user):
     store = SqlGrowthStore(connection)
     qualification = store.qualification(account_id)
@@ -120,6 +138,7 @@ def account_context(connection, account_id, user):
     return {
         "qualification": dict(qualification, signals=json.loads(qualification["signals"])) if qualification else None,
         "jobs": store.account_jobs(account_id),
+        "apollo": apollo_web_status(),
         **account_credit_access(store, user, qualification, config, observed=now() if user["role"] == "sdr" else None),
     }
 
@@ -138,7 +157,8 @@ def index():
     }, "recent")
     return render_template(
         "operations.html", **context, selected=selected, workload=store.workload(observed),
-        last_worker_pass=last_pass(connection), credits=store.total_credits(),
+        apollo=apollo_web_status(),
+        last_worker_pass=last_pass(connection),
         coverage=store.coverage(local_day(viewer, observed).isoformat()), config=store.rules(),
         funnel=store.source_funnel(), qualification_jobs=store.qualification_jobs(),
         qualification_scopes=QUALIFICATION_SCOPES, qualification_active=bool(store.active_qualification_job()),
@@ -181,7 +201,7 @@ def export_source_funnel():
     writer = csv.writer(body)
     writer.writerow(("Source", "Discovered", "Scored", "Assigned", "Worked", "Positive", "Delivered", "Credits"))
     for row in rows:
-        writer.writerow(tuple(row))
+        writer.writerow(row.values())
     return Response(body.getvalue(), mimetype="text/csv", headers={
         "Content-Disposition": "attachment; filename=nunify-source-funnel.csv",
     })
@@ -227,11 +247,19 @@ def qualify_account(account_id):
 def enrich(account_id):
     user = g.crm_user
     person_id = request.form.get("person_id", type=int)
+    if "person_id" in request.form and (person_id is None or person_id <= 0):
+        abort(400, "Choose a contact for email unlock.")
     store = SqlGrowthStore(db())
     with _errors(), store.atomic():
         account = account_required(account_id, write=True)
-        queued = request_enrichment(store, account, person_id, user, observed=now())
-    flash("Enrichment queued." if queued else "This request is already recorded.", "success")
+        provider = web_enrichment_provider(person_id)
+        observed = now()
+        queued = request_enrichment(store, account, person_id, user, observed=observed)
+        job_id = store.requested_credit_job_id(account_id, person_id, user["id"], observed) if provider else None
+    if job_id is not None:
+        enrich_next(store, provider, clock=now, job_id=job_id)
+    else:
+        flash("Enrichment queued." if queued else "This request is already recorded.", "success")
     return redirect(url_for("account_detail", account_id=account_id), code=303)
 
 
@@ -241,6 +269,9 @@ def retry(job_id):
     store = SqlGrowthStore(db())
     with _errors(), store.atomic():
         retry_enrichment(store, user, job_id, now())
+        provider = web_enrichment_provider(store.credit_job(job_id)["person_id"])
+    if provider is not None:
+        enrich_next(store, provider, clock=now, job_id=job_id)
     return redirect(url_for("growth_ops.index"), code=303)
 
 

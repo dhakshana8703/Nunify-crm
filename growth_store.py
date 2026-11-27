@@ -1,9 +1,14 @@
 """SQL adapters for qualification, outreach restrictions and enrichment."""
 
 import json
+from decimal import Decimal
 
 from account_facts_store import refresh_account_facts
+from credit_ledger_store import initialize_credit_ledger
+from credit_reporting_store import credit_sum_function
+from crm_core.credit_ledger import parse_credits
 from crm_core.growth import DEFAULT_RULES, local_day
+from crm_store import table_exists
 from suppression_projection import refresh_account_suppression
 from workflow_store import (
     account_relation, account_rows, audit, save_suppression_rule, suppression_reason, suppression_rules,
@@ -64,17 +69,6 @@ CREATE TABLE IF NOT EXISTS credit_jobs (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS credit_jobs_open
 ON credit_jobs(account_id, action, COALESCE(person_id, 0)) WHERE state IN ('queued', 'processing', 'failed');
-CREATE TABLE IF NOT EXISTS credit_ledger (
-    id INTEGER PRIMARY KEY,
-    job_id INTEGER NOT NULL UNIQUE REFERENCES credit_jobs(id),
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    account_id INTEGER NOT NULL REFERENCES accounts(id),
-    person_id INTEGER REFERENCES people(id),
-    action TEXT NOT NULL,
-    credits INTEGER NOT NULL CHECK (credits > 0),
-    on_day TEXT NOT NULL,
-    at TEXT NOT NULL
-);
 """
 
 
@@ -85,6 +79,15 @@ def initialize(connection):
         if "budget_day" not in fields:
             connection.execute("ALTER TABLE credit_jobs ADD COLUMN budget_day TEXT NOT NULL DEFAULT ''")
             connection.execute("UPDATE credit_jobs SET budget_day = substr(created_at, 1, 10)")
+        if "reconciliation_required" not in fields:
+            connection.execute("""
+                ALTER TABLE credit_jobs ADD COLUMN reconciliation_required INTEGER NOT NULL DEFAULT 0
+                CHECK (reconciliation_required IN (0, 1))
+            """)
+        people_fields = {row["name"] for row in connection.execute("PRAGMA table_info(people)")}
+        if "apollo_person_id" not in people_fields:
+            connection.execute("ALTER TABLE people ADD COLUMN apollo_person_id TEXT")
+        initialize_credit_ledger(connection)
 
 
 class SqlGrowthStore:
@@ -222,11 +225,15 @@ class SqlGrowthStore:
         return user["daily_credit_quota"]
 
     def credit_usage(self, user_id, day):
-        return self.connection.execute("""
-            SELECT COALESCE((SELECT SUM(credits) FROM credit_ledger WHERE user_id = ? AND on_day = ?), 0)
-                 + (SELECT COUNT(*) FROM credit_jobs WHERE actor_id = ? AND on_day = ?
-                      AND state IN ('queued', 'processing', 'failed'))
-        """, (user_id, day, user_id, day)).fetchone()[0]
+        aggregate = credit_sum_function(self.connection)
+        posted, reserved = self.connection.execute(f"""
+            SELECT COALESCE((SELECT {aggregate}(credits)
+                             FROM credit_ledger WHERE user_id = ? AND on_day = ?), 0),
+                   (SELECT COUNT(*) FROM credit_jobs j WHERE actor_id = ? AND on_day = ?
+                      AND state IN ('queued', 'processing', 'failed')
+                      AND NOT EXISTS (SELECT 1 FROM credit_ledger l WHERE l.job_id = j.id))
+        """, (user_id, day, user_id, day)).fetchone()
+        return Decimal(str(posted)) + reserved
 
     def auto_usage(self, day):
         return self.connection.execute("""
@@ -242,52 +249,99 @@ class SqlGrowthStore:
                     :on_day, :budget_day, :request_key, :auto, :created_at)
         """, dict(job, auto=int(job["auto"]), created_at=timestamp(job["observed"])))
 
-    def claimable_credit_jobs(self, observed):
+    def requested_credit_job_id(self, account_id, person_id, actor_id, observed):
+        row = self.connection.execute("""
+            SELECT id FROM credit_jobs
+            WHERE account_id = ? AND actor_id = ? AND action = ?
+              AND (person_id = ? OR (person_id IS NULL AND CAST(? AS INTEGER) IS NULL))
+              AND reconciliation_required = 0
+              AND (state = 'queued' OR (state = 'processing' AND lease_until <= ?))
+            ORDER BY id DESC LIMIT 1
+        """, (account_id, actor_id, "email_unlock" if person_id else "people_search", person_id,
+              person_id, timestamp(observed))).fetchone()
+        return row["id"] if row else None
+
+    def claimable_credit_jobs(self, observed, *, job_id=None):
         return self.connection.execute("""
-            SELECT j.*, a.organization_type, u.role, u.timezone, u.active, u.daily_credit_quota
+            SELECT j.*, a.organization_type, u.role, u.timezone, u.active, u.daily_credit_quota,
+                   p.apollo_person_id
             FROM credit_jobs j JOIN accounts a ON a.id = j.account_id JOIN users u ON u.id = j.actor_id
-            WHERE j.state = 'queued' OR (j.state = 'processing' AND j.lease_until <= ?)
+            LEFT JOIN people p ON p.id = j.person_id AND p.account_id = j.account_id
+            WHERE (CAST(? AS INTEGER) IS NULL OR j.id = ?) AND j.reconciliation_required = 0 AND
+                  (j.state = 'queued' OR (j.state = 'processing' AND j.lease_until <= ?))
             ORDER BY j.id
-        """, (timestamp(observed),))
+        """, (job_id, job_id, timestamp(observed))).fetchall()
 
     def hold_credit_job(self, job_id, reason, *, release=False):
         if release:
             self.connection.execute("""
-                UPDATE credit_jobs SET state = 'blocked', error = ?, lease_token = NULL, lease_until = NULL WHERE id = ?
+                UPDATE credit_jobs SET state = 'blocked', error = ?, lease_token = NULL, lease_until = NULL,
+                    reconciliation_required = 0 WHERE id = ?
             """, (reason, job_id))
         else:
             self.connection.execute("UPDATE credit_jobs SET state = 'blocked', error = ? WHERE id = ?", (reason, job_id))
 
-    def claim_credit_job(self, job, token, expires_at):
+    def claim_credit_job(self, job, token, expires_at, *, may_spend=False):
         self.connection.execute("""
             UPDATE credit_jobs SET state = 'processing', lease_token = ?, lease_until = ?,
-                on_day = ?, budget_day = ?, attempts = attempts + 1
+                on_day = ?, budget_day = ?, attempts = attempts + 1, reconciliation_required = ?
             WHERE id = ?
-        """, (token, timestamp(expires_at), job["on_day"], job["budget_day"], job["id"]))
+        """, (token, timestamp(expires_at), job["on_day"], job["budget_day"], int(may_spend), job["id"]))
 
     def owns_credit_job(self, job_id, token):
         return self.connection.execute("""
             SELECT 1 FROM credit_jobs WHERE id = ? AND state = 'processing' AND lease_token = ?
         """, (job_id, token)).fetchone() is not None
 
-    def charge_credit(self, job, observed):
-        self.connection.execute("""
-            INSERT INTO credit_ledger(job_id, user_id, account_id, person_id, action, credits, on_day, at)
-            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+    def charge_credit(self, job, observed, credits=1, *, confirmed=False):
+        source = "apollo" if confirmed else "offline"
+        day = local_day(job, observed).isoformat() if confirmed else job["on_day"]
+        posting = self.connection.execute("""
+            INSERT INTO credit_ledger(job_id, user_id, account_id, person_id, action, credits, on_day, at,
+                                      source, reference)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(job_id) DO NOTHING
         """, (job["id"], job["actor_id"], job["account_id"], job["person_id"], job["action"],
-              job["on_day"], timestamp(observed)))
+              str(credits), day, timestamp(observed), source, job["request_key"]))
+        if posting.rowcount == 0:
+            saved = self.connection.execute("""
+                SELECT source, reference, credits FROM credit_ledger WHERE job_id = ?
+            """, (job["id"],)).fetchone()
+            if (saved["source"] != source or saved["reference"] != job["request_key"]
+                    or parse_credits(saved["credits"]) != parse_credits(credits)):
+                raise ValueError("This job already has a different credit posting.")
 
-    def save_unlocked_email(self, person_id, email):
-        self.connection.execute("UPDATE people SET email = ?, unlocked = 1, email_verified = 1 WHERE id = ?",
-                                (email, person_id))
+    def save_unlocked_email(self, person_id, email, *, verified=True):
+        self.connection.execute("UPDATE people SET email = ?, unlocked = 1, email_verified = ? WHERE id = ?",
+                                (email, int(verified), person_id))
 
-    def save_enriched_contact(self, account_id, name, title):
+    def save_enriched_contact(self, account_id, name, title, *, apollo_person_id=None):
+        if apollo_person_id and self.connection.execute("""
+            SELECT 1 FROM people WHERE account_id = ? AND apollo_person_id = ?
+        """, (account_id, apollo_person_id)).fetchone():
+            return
+        if apollo_person_id and table_exists(self.connection, "cvent_apollo_leads"):
+            saved = self.connection.execute("""
+                SELECT p.id, p.apollo_person_id FROM cvent_apollo_leads l
+                JOIN people p ON p.id = l.person_id
+                WHERE p.account_id = ? AND l.apollo_id = ?
+            """, (account_id, apollo_person_id)).fetchone()
+            if saved is not None:
+                if saved["apollo_person_id"] is not None:
+                    raise ValueError("The saved contact has a conflicting Apollo person ID.")
+                self.connection.execute("UPDATE people SET apollo_person_id = ? WHERE id = ?",
+                                        (apollo_person_id, saved["id"]))
+                return
         self.connection.execute("""
-            INSERT INTO people(account_id, name, title, persona, origin) VALUES (?, ?, ?, 'P1', 'apollo_offline')
-        """, (account_id, name, title))
+            INSERT INTO people(account_id, name, title, persona, origin, apollo_person_id)
+            VALUES (?, ?, ?, 'P1', ?, ?)
+        """, (account_id, name, title, "apollo" if apollo_person_id else "apollo_offline", apollo_person_id))
 
-    def complete_credit_job(self, job_id):
-        self.connection.execute("UPDATE credit_jobs SET state = 'done', error = NULL WHERE id = ?", (job_id,))
+    def complete_credit_job(self, job_id, note=None):
+        self.connection.execute("""
+            UPDATE credit_jobs SET state = 'done', error = ?, reconciliation_required = 0,
+                lease_token = NULL, lease_until = NULL WHERE id = ?
+        """, (note, job_id))
 
     def fail_credit_job(self, job_id, token, reason):
         self.connection.execute("""
@@ -350,9 +404,6 @@ class SqlGrowthStore:
             JOIN users u ON u.id = j.actor_id
         """)]
 
-    def total_credits(self):
-        return self.connection.execute("SELECT COALESCE(SUM(credits), 0) FROM credit_ledger").fetchone()[0]
-
     def coverage(self, day):
         return self.connection.execute("""
             SELECT (SELECT COUNT(*) FROM accounts a
@@ -371,13 +422,18 @@ class SqlGrowthStore:
         """).fetchall()
 
     def source_funnel(self):
-        return self.connection.execute("""
+        credit_sum = credit_sum_function(self.connection)
+        rows = self.connection.execute(f"""
             WITH evidence AS (
                 SELECT source AS source_name, account_id FROM source_records WHERE account_id IS NOT NULL
                 UNION
                 SELECT source_slug AS source_name, account_id FROM imported_source_evidence
+            ), spend AS (
+                SELECT e.source_name, {credit_sum}(l.credits) AS credits FROM evidence e
+                JOIN credit_ledger l ON l.account_id = e.account_id AND l.source <> 'offline'
+                GROUP BY e.source_name
             )
-            SELECT source_name, COUNT(*) AS discovered,
+            SELECT e.source_name, COUNT(*) AS discovered,
                    COUNT(CASE WHEN EXISTS(SELECT 1 FROM qualifications q WHERE q.account_id = e.account_id)
                               THEN 1 END) AS scored,
                    COUNT(CASE WHEN EXISTS(SELECT 1 FROM account_work w
@@ -390,9 +446,11 @@ class SqlGrowthStore:
                    COUNT(CASE WHEN EXISTS(SELECT 1 FROM handoffs h
                                           WHERE h.account_id = e.account_id AND h.status = 'delivered')
                               THEN 1 END) AS delivered,
-                   SUM(COALESCE((SELECT SUM(credits) FROM credit_ledger l WHERE l.account_id = e.account_id), 0)) AS credits
-            FROM evidence e GROUP BY source_name ORDER BY source_name
+                   COALESCE(s.credits, '0') AS credits
+            FROM evidence e LEFT JOIN spend s ON s.source_name = e.source_name
+            GROUP BY e.source_name, s.credits ORDER BY e.source_name
         """).fetchall()
+        return [dict(row, credits=Decimal(str(row["credits"]))) for row in rows]
 
 
 class OfflineApollo:

@@ -16,10 +16,13 @@ def fingerprint(value):
 
 def _contact_conflicts(people):
     affected = []
-    for field, label in (("email", "email"), ("linkedin_url", "LinkedIn profile")):
+    for field, label in (("email", "email"), ("linkedin_url", "LinkedIn profile"),
+                         ("apollo_person_id", "Apollo person ID")):
         seen = defaultdict(set)
         for person in people:
-            value = person.get(field, "").strip().casefold()
+            value = (person.get(field) or "").strip()
+            if field != "apollo_person_id":
+                value = value.casefold()
             if value:
                 seen[value].add(person["account_id"])
         if any(len(accounts) > 1 for accounts in seen.values()):
